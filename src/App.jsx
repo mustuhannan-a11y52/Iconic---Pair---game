@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import * as Tone from "tone";
+import { motion } from "framer-motion";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -8,8 +9,7 @@ const supabase = createClient(
 );
 
 /* ---------------------------------------------------------
-   ICONIC PAIRS — player-facing app.
-   Admin console lives in the separate admin-panel.jsx file.
+   ICONIC PAIRS — live web-based pairs-matching game platform
 --------------------------------------------------------- */
 
 const FONT_IMPORT =
@@ -25,7 +25,9 @@ const INPUT_BORDER = "rgba(247,244,239,0.22)";
 
 const MATCH_POINTS = 500;
 const BONUS_POINTS = 1000;
-const BONUS_EVERY_TURNS = 7;
+const BONUS_INTERVAL_SECONDS = 6;
+const DEFAULT_COUNTDOWN_SECONDS = 10;
+const DEFAULT_TIMER_SECONDS = 0; // 0 = unlimited
 
 const BACKGROUND_PRESETS = [
   { id: "midnight", name: "Midnight indigo", css: `linear-gradient(135deg, #14142B 0%, #1E1E42 100%)` },
@@ -35,26 +37,66 @@ const BACKGROUND_PRESETS = [
   { id: "plum", name: "Plum", css: `linear-gradient(135deg, #2D1B4E 0%, #6C4AB6 100%)` },
 ];
 
-const DEFAULT_PAIRS = [
-  ["Salt", "Pepper"], ["Tom", "Jerry"], ["Batman", "Robin"], ["Bonnie", "Clyde"],
-  ["Peanut Butter", "Jelly"], ["Mario", "Luigi"], ["Sherlock", "Watson"], ["Bread", "Butter"],
-  ["Thunder", "Lightning"], ["Romeo", "Juliet"], ["Ross", "Rachel"], ["Wallace", "Gromit"],
-  ["Simon", "Garfunkel"], ["Fish", "Chips"], ["Cookies", "Cream"], ["Hansel", "Gretel"],
-  ["Yin", "Yang"], ["Sun", "Moon"], ["Needle", "Thread"], ["Lock", "Key"],
-  ["Cup", "Saucer"], ["Knife", "Fork"], ["Shoes", "Socks"], ["Milk", "Cookies"],
-  ["Thelma", "Louise"],
-].map((p, i) => ({ id: "p" + i, a: p[0], b: p[1] }));
+/* 8 categories x 10 pairs each */
+const CATEGORY_NAMES = ["Movies & TV", "Food & Drink", "Music", "Sports", "Nature", "Everyday Objects", "Classic Duos", "Office Life"];
 
-/* Large keyword -> emoji dictionary. Lowercase keys. Covers named characters
-   from the default pairs plus ~180 common everyday nouns, so most words an
-   admin types in get their real, correct icon automatically. */
+const RAW_CATEGORY_PAIRS = {
+  "Movies & TV": [
+    ["Batman", "Robin"], ["Tom", "Jerry"], ["Mario", "Luigi"], ["Sherlock", "Watson"], ["Ross", "Rachel"],
+    ["Wallace", "Gromit"], ["Hansel", "Gretel"], ["Thelma", "Louise"], ["Woody", "Buzz"], ["Shrek", "Donkey"],
+  ],
+  "Food & Drink": [
+    ["Salt", "Pepper"], ["Peanut Butter", "Jelly"], ["Bread", "Butter"], ["Fish", "Chips"], ["Milk", "Cookies"],
+    ["Tea", "Biscuit"], ["Burger", "Fries"], ["Macaroni", "Cheese"], ["Bacon", "Eggs"], ["Coffee", "Cream"],
+  ],
+  "Music": [
+    ["Simon", "Garfunkel"], ["Guitar", "Amplifier"], ["Drum", "Cymbal"], ["Piano", "Bench"], ["Headphones", "Speaker"],
+    ["Vinyl", "Turntable"], ["Violin", "Bow"], ["Microphone", "Stand"], ["Band", "Stage"], ["DJ", "Deck"],
+  ],
+  "Sports": [
+    ["Bat", "Ball"], ["Racket", "Net"], ["Goal", "Post"], ["Bowling", "Pin"], ["Boxing Glove", "Ring"],
+    ["Ski", "Snow"], ["Helmet", "Pad"], ["Jersey", "Number"], ["Whistle", "Referee"], ["Trophy", "Medal"],
+  ],
+  "Nature": [
+    ["Sun", "Moon"], ["Thunder", "Lightning"], ["Rain", "Umbrella"], ["Bee", "Flower"], ["Earth", "Sky"],
+    ["Ocean", "Wave"], ["Tree", "Leaf"], ["Fire", "Smoke"], ["Mountain", "Valley"], ["Day", "Night"],
+  ],
+  "Everyday Objects": [
+    ["Lock", "Key"], ["Needle", "Thread"], ["Knife", "Fork"], ["Shoes", "Socks"], ["Pen", "Paper"],
+    ["Soap", "Water"], ["Broom", "Dustpan"], ["Hammer", "Nail"], ["Nut", "Bolt"], ["Cup", "Saucer"],
+  ],
+  "Classic Duos": [
+    ["Romeo", "Juliet"], ["Bonnie", "Clyde"], ["Yin", "Yang"], ["Beauty", "Beast"], ["Jack", "Jill"],
+    ["Prince", "Princess"], ["Wizard", "Wand"], ["Pirate", "Treasure"], ["Dragon", "Knight"], ["King", "Queen"],
+  ],
+  "Office Life": [
+    ["Coffee", "Mug"], ["Laptop", "Charger"], ["Stapler", "Paper"], ["Pen", "Notepad"], ["Team", "Trophy"],
+    ["Idea", "Whiteboard"], ["Email", "Inbox"], ["Printer", "Paper"], ["Desk", "Chair"], ["Boss", "Employee"],
+  ],
+};
+
+function buildDefaultCategories() {
+  const out = {};
+  CATEGORY_NAMES.forEach((cat) => {
+    out[cat] = RAW_CATEGORY_PAIRS[cat].map((p, i) => ({ id: cat.replace(/\s+/g, "") + "-" + i, a: p[0], b: p[1] }));
+  });
+  return out;
+}
+const DEFAULT_CATEGORIES = buildDefaultCategories();
+
 const EMOJI_DICTIONARY = {
   salt: "🧂", pepper: "🌶️", tom: "🐱", jerry: "🐭", batman: "🦇", robin: "🐦",
   bonnie: "💃", clyde: "🤵", "peanut butter": "🥜", jelly: "🍇", mario: "🍄", luigi: "👻",
   sherlock: "🕵️", watson: "📓", thunder: "⛈️", lightning: "⚡", romeo: "🌹", juliet: "🌙",
   ross: "🦖", rachel: "☕", wallace: "🧀", gromit: "🐶", simon: "🎤", garfunkel: "🎸",
   chips: "🍟", cream: "🍦", hansel: "👦", gretel: "👧", yin: "☯️", yang: "☯️",
-  saucer: "🛸", thelma: "🚗", louise: "🛣️",
+  saucer: "🛸", thelma: "🚗", louise: "🛣️", woody: "🤠", buzz: "🚀", shrek: "🟢", donkey: "🐴",
+  biscuit: "🍪", macaroni: "🍝", bacon: "🥓", eggs: "🥚", amplifier: "🔊", cymbal: "🥁",
+  bench: "🪑", turntable: "💿", bow: "🎀", deck: "💿", stand: "🎤", stage: "🏟️",
+  racket: "🎾", net: "🥅", post: "🥅", pin: "📌", glove: "🧤", ring: "💍", pad: "🛡️",
+  number: "🔢", referee: "🦺", valley: "🏞️", smoke: "💨", dustpan: "🧹", bolt: "🔩",
+  beast: "🐺", treasure: "💰", knight: "♞", king: "🤴", queen: "👸", mug: "☕",
+  charger: "🔌", notepad: "📝", whiteboard: "📋", inbox: "📥", employee: "🧑‍💼", stapler: "📎",
   cat: "🐱", dog: "🐶", mouse: "🐭", rat: "🐀", rabbit: "🐰", fox: "🦊", bear: "🐻",
   panda: "🐼", koala: "🐨", tiger: "🐯", lion: "🦁", cow: "🐮", pig: "🐷", frog: "🐸",
   monkey: "🐵", chicken: "🐔", penguin: "🐧", bird: "🐦", eagle: "🦅", owl: "🦉", bat: "🦇",
@@ -65,7 +107,7 @@ const EMOJI_DICTIONARY = {
   dragon: "🐉", dinosaur: "🦖", spider: "🕷️", scorpion: "🦂", peacock: "🦚", parrot: "🦜",
   flamingo: "🦩", rooster: "🐓", duck: "🦆", swan: "🦢",
   pizza: "🍕", burger: "🍔", fries: "🍟", hotdog: "🌭", taco: "🌮", burrito: "🌯", sandwich: "🥪",
-  salad: "🥗", popcorn: "🍿", bacon: "🥓", egg: "🥚", pancake: "🥞", waffle: "🧇", cheese: "🧀",
+  salad: "🥗", popcorn: "🍿", pancake: "🥞", waffle: "🧇", cheese: "🧀",
   bread: "🍞", croissant: "🥐", baguette: "🥖", pretzel: "🥨", donut: "🍩", cookie: "🍪",
   cake: "🎂", cupcake: "🧁", pie: "🥧", chocolate: "🍫", candy: "🍬", lollipop: "🍭", honey: "🍯",
   icecream: "🍦", sundae: "🍨", apple: "🍎", banana: "🍌", grapes: "🍇", watermelon: "🍉",
@@ -76,33 +118,33 @@ const EMOJI_DICTIONARY = {
   juice: "🧃", beer: "🍺", wine: "🍷", cocktail: "🍸",
   key: "🔑", lock: "🔒", phone: "📱", laptop: "💻", camera: "📷", clock: "⏰", watch: "⌚",
   book: "📖", pencil: "✏️", pen: "🖊️", scissors: "✂️", hammer: "🔨", wrench: "🔧",
-  screwdriver: "🪛", pin: "📌", needle: "🪡", thread: "🧵", lightbulb: "💡", candle: "🕯️",
+  screwdriver: "🪛", needle: "🪡", thread: "🧵", lightbulb: "💡", candle: "🕯️",
   flashlight: "🔦", umbrella: "☔", suitcase: "🧳", backpack: "🎒", wallet: "👛", purse: "👜",
-  glasses: "👓", crown: "👑", ring: "💍", gem: "💎", gift: "🎁", balloon: "🎈", flag: "🚩",
+  glasses: "👓", crown: "👑", gem: "💎", gift: "🎁", balloon: "🎈", flag: "🚩",
   map: "🗺️", compass: "🧭", telescope: "🔭", microscope: "🔬", sword: "⚔️", shield: "🛡️",
   anchor: "⚓", magnet: "🧲", battery: "🔋", plug: "🔌",
   sun: "☀️", moon: "🌛", star: "⭐", cloud: "☁️", rain: "🌧️", snow: "❄️", rainbow: "🌈",
   fire: "🔥", water: "💧", wave: "🌊", mountain: "⛰️", volcano: "🌋", desert: "🏜️",
   island: "🏝️", tree: "🌳", flower: "🌸", rose: "🌹", sunflower: "🌻", cactus: "🌵",
-  leaf: "🍃", earth: "🌍", wind: "🌬️",
+  leaf: "🍃", earth: "🌍", sky: "🌌", wind: "🌬️", day: "🌤️", night: "🌃",
   car: "🚗", taxi: "🚕", bus: "🚌", truck: "🚚", train: "🚆", airplane: "✈️",
   helicopter: "🚁", boat: "⛵", ship: "🚢", rocket: "🚀", bicycle: "🚲", motorcycle: "🏍️",
   scooter: "🛴", tractor: "🚜",
   guitar: "🎸", piano: "🎹", drum: "🥁", violin: "🎻", trumpet: "🎺", microphone: "🎤",
-  headphones: "🎧", saxophone: "🎷",
+  headphones: "🎧", saxophone: "🎷", vinyl: "💿",
   football: "⚽", basketball: "🏀", baseball: "⚾", tennis: "🎾", golf: "⛳", bowling: "🎳",
   hockey: "🏒", rugby: "🏉", ski: "🎿", boxing: "🥊", medal: "🏅", trophy: "🏆",
   robot: "🤖", computer: "🖥️", keyboard: "⌨️", printer: "🖨️", satellite: "🛰️",
   house: "🏠", castle: "🏰", church: "⛪", hospital: "🏥", school: "🏫", factory: "🏭",
   bank: "🏦", hotel: "🏨", tent: "⛺",
-  shirt: "👕", pants: "👖", shoe: "👟", boot: "🥾", hat: "🎩", glove: "🧤", sock: "🧦",
-  scarf: "🧣", dress: "👗", tie: "👔",
+  shirt: "👕", pants: "👖", shoe: "👟", boot: "🥾", hat: "🎩", scarf: "🧣", dress: "👗", tie: "👔",
   doctor: "🩺", police: "👮", chef: "👨‍🍳", farmer: "👨‍🌾", pirate: "🏴‍☠️", ghost: "👻",
   alien: "👽", zombie: "🧟", vampire: "🧛", wizard: "🧙", fairy: "🧚", mermaid: "🧜",
-  superhero: "🦸", ninja: "🥷", clown: "🤡",
+  superhero: "🦸", ninja: "🥷", clown: "🤡", jack: "🃏", jill: "👧", prince: "🤴", princess: "👸",
   heart: "❤️", skull: "💀", bomb: "💣", diamond: "💎", bell: "🔔", puzzle: "🧩",
   dice: "🎲", target: "🎯", paint: "🎨", mask: "🎭", gamepad: "🎮", knife: "🔪", fork: "🍴",
-  cup: "🍵", cookies: "🍪", jelly2: "🍇",
+  cup: "🍵", cookies: "🍪", jersey: "👕", team: "🤝", idea: "💡", email: "📧", desk: "🗄️",
+  chair: "🪑", boss: "🧑‍💼", soap: "🧼", broom: "🧹",
 };
 function normalizeWord(w) { return w.trim().toLowerCase(); }
 function singularize(w) {
@@ -117,14 +159,7 @@ const AUTO_ICON_PALETTE = [
   "🎺", "🥁", "🎷", "🎸", "💎", "🔮", "🧸", "🪄", "💫", "⚡️",
   "🍭", "🍬", "🧁", "🍩", "🥇", "🏅", "🌟", "🦄", "🐉", "🎠",
 ];
-function hashCode(str) {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) { h = (h << 5) - h + str.charCodeAt(i); h |= 0; }
-  return Math.abs(h);
-}
-// Exact dictionary match first (whole phrase, then each word, singular or
-// plural). Only a genuinely unrecognized word falls back to an auto-assigned
-// themed icon — the same word always gets the same fallback icon.
+function hashCode(str) { let h = 0; for (let i = 0; i < str.length; i++) { h = (h << 5) - h + str.charCodeAt(i); h |= 0; } return Math.abs(h); }
 function iconFor(label) {
   const norm = normalizeWord(label);
   if (EMOJI_DICTIONARY[norm]) return EMOJI_DICTIONARY[norm];
@@ -154,7 +189,7 @@ function shuffle(arr) {
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
   return a;
 }
-function fmtTime(sec) { const m = Math.floor(sec / 60); const s = sec % 60; return `${m}:${String(s).padStart(2, "0")}`; }
+function fmtTime(sec) { const s = Math.max(0, sec); const m = Math.floor(s / 60); const r = s % 60; return `${m}:${String(r).padStart(2, "0")}`; }
 
 async function loadJSON(key, fallback) {
   try {
@@ -164,14 +199,11 @@ async function loadJSON(key, fallback) {
   } catch (e) { return fallback; }
 }
 async function saveJSON(key, value) {
-  try {
-    const { error } = await supabase.from("kv_store").upsert({ key, value });
-    return !error;
-  } catch (e) { return false; }
+  try { const { error } = await supabase.from("kv_store").upsert({ key, value }); return !error; } catch (e) { return false; }
 }
 
 /* ---------------------------------------------------------
-   AUDIO — punchier upbeat loop + sfx via Tone.js
+   AUDIO
 --------------------------------------------------------- */
 
 function useGameAudio() {
@@ -189,32 +221,25 @@ function useGameAudio() {
       const kick = new Tone.MembraneSynth({ pitchDecay: 0.03, octaves: 5, envelope: { attack: 0.001, decay: 0.35, sustain: 0 } }).toDestination();
       kick.volume.value = -6;
       const kickLoop = new Tone.Loop((t) => kick.triggerAttackRelease("C2", "8n", t), "4n").start(0);
-
       const hat = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.045, sustain: 0 } }).toDestination();
       hat.volume.value = -18;
       const hatLoop = new Tone.Loop((t) => hat.triggerAttackRelease("16n", t), "8n").start("8n");
-
       const bass = new Tone.Synth({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.25, release: 0.25 } }).toDestination();
       bass.volume.value = -12;
       const bassNotes = ["C3", "A2", "F2", "G2"];
       let bi = 0;
       const bassLoop = new Tone.Loop((t) => { bass.triggerAttackRelease(bassNotes[bi % 4], "2n", t); bi++; }, "1m").start(0);
-
       const arp = new Tone.Synth({ oscillator: { type: "triangle" }, envelope: { attack: 0.004, decay: 0.18, sustain: 0.05, release: 0.15 } }).toDestination();
       arp.volume.value = -9;
       const arpPattern = ["C5", "E5", "G5", "E5", "A4", "C5", "E5", "C5", "F4", "A4", "C5", "A4", "G4", "B4", "D5", "B4"];
       const arpSeq = new Tone.Sequence((t, note) => arp.triggerAttackRelease(note, "8n", t), arpPattern, "8n").start(0);
-
       Tone.Transport.start();
-
       const synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "triangle" }, envelope: { attack: 0.01, decay: 0.25, sustain: 0.05, release: 0.6 } }).toDestination();
       synth.volume.value = -3;
       synthRef.current = synth;
-
       nodesRef.current = [kick, kickLoop, hat, hatLoop, bass, bassLoop, arp, arpSeq, synth];
     } catch (e) {}
   };
-
   const stop = () => {
     try {
       nodesRef.current.forEach((n) => { n.stop?.(); n.dispose?.(); });
@@ -223,17 +248,15 @@ function useGameAudio() {
       startedRef.current = false;
     } catch (e) {}
   };
-
   const playMatch = () => { try { synthRef.current?.triggerAttackRelease(["C5", "E5", "G5"], "8n"); } catch (e) {} };
   const playBonus = () => { try { synthRef.current?.triggerAttackRelease(["C5", "E5", "G5", "C6"], "4n"); } catch (e) {} };
   const playDoubleMatch = () => { try { synthRef.current?.triggerAttackRelease(["E5", "G5", "C6", "E6"], "4n"); } catch (e) {} };
   const playWin = () => { try { synthRef.current?.triggerAttackRelease(["C5", "E5", "G5", "C6", "E6"], "2n"); } catch (e) {} };
   const playStreak = () => { try { synthRef.current?.triggerAttackRelease(["G5", "B5"], "16n"); } catch (e) {} };
   const playHighScore = () => { try { synthRef.current?.triggerAttackRelease(["C5", "E5", "G5", "C6", "E6", "G6"], "1n"); } catch (e) {} };
-
+  const playTick = () => { try { synthRef.current?.triggerAttackRelease("A4", "32n"); } catch (e) {} };
   const toggleMute = () => { const next = !muted; setMuted(next); Tone.Destination.mute = next; };
-
-  return { boot, stop, playMatch, playBonus, playDoubleMatch, playWin, playStreak, playHighScore, muted, toggleMute };
+  return { boot, stop, playMatch, playBonus, playDoubleMatch, playWin, playStreak, playHighScore, playTick, muted, toggleMute };
 }
 
 /* ---------------------------------------------------------
@@ -255,7 +278,7 @@ function Confetti({ burstKey, colors, count = 16, spread = 140, originTop = 0 })
     const shape = Math.random() > 0.5 ? "50%" : "3px";
     return (
       <span key={burstKey + "-" + i} className="ip-confetti-particle" style={{
-        "--dx": `${dx}px`, "--dy": `${dy}px`, "--rot": `${rot}deg`, left: "50%", top: originTop,
+        "--dx": `${dx}px`, "--dy": `${dy}px`, left: "50%", top: originTop,
         width: size, height: size, background: color, borderRadius: shape,
         animationDuration: `${dur}ms`, animationDelay: `${delay}ms`,
       }} />
@@ -274,7 +297,6 @@ function MatchCelebration({ triggerKey }) {
     </div>
   );
 }
-
 function GoldFlash({ triggerKey }) {
   if (!triggerKey) return null;
   return <div key={triggerKey} className="ip-gold-flash" style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 27, background: "radial-gradient(circle, rgba(242,169,59,0.55), transparent 65%)" }} />;
@@ -331,8 +353,10 @@ function Shell({ background, children }) {
         .ip-progress-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, ${COLORS.gold}, ${COLORS.coral}); transition: width 0.4s ease; }
         .ip-ticker-in { animation: ip-ticker-in 0.35s ease both; }
         @keyframes ip-ticker-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+        .ip-countdown-pop { animation: ip-countdown-pop 1s cubic-bezier(.2,.8,.3,1.1) both; }
+        @keyframes ip-countdown-pop { 0% { opacity: 0; transform: scale(0.4); } 30% { opacity: 1; transform: scale(1.15); } 100% { opacity: 0; transform: scale(1.4); } }
         @media (prefers-reduced-motion: reduce) {
-          .ip-card-inner, .ip-card-matched, .ip-fade-in, .ip-drift-slow, .ip-glow-pulse, .ip-confetti-particle, .ip-toast-in, .ip-banner-in, .ip-celebrate-pop, .ip-gold-flash, .ip-ticker-in { animation: none !important; transition: none !important; }
+          .ip-card-inner, .ip-card-matched, .ip-fade-in, .ip-drift-slow, .ip-glow-pulse, .ip-confetti-particle, .ip-toast-in, .ip-banner-in, .ip-celebrate-pop, .ip-gold-flash, .ip-ticker-in, .ip-countdown-pop { animation: none !important; transition: none !important; }
         }
       `}</style>
       <div className="ip-dotgrid" />
@@ -368,6 +392,70 @@ function PrimaryButton({ children, onClick, disabled, color = COLORS.gold, full,
 }
 function GhostButton({ children, onClick, style }) {
   return <button className="ip-btn" onClick={onClick} style={{ background: "rgba(247,244,239,0.06)", color: COLORS.cream, border: "1px solid rgba(247,244,239,0.28)", borderRadius: 10, padding: "9px 16px", fontSize: 13, ...style }}>{children}</button>;
+}
+
+/* ---------------------------------------------------------
+   INSTRUCTIONS
+--------------------------------------------------------- */
+
+function InstructionsContent({ game }) {
+  const countdownSeconds = game.countdownSeconds ?? DEFAULT_COUNTDOWN_SECONDS;
+  const timerSeconds = game.timerSeconds ?? 0;
+  const rows = [
+    { icon: "🃏", text: `Tap two cards to flip them. Find each card's iconic other half — like Salt & Pepper, or Batman & Robin.` },
+    { icon: "✨", text: `Every correct pair is worth ${MATCH_POINTS} points.` },
+    { icon: "⚡", text: `Watch for the gold "Double Points" banner — it pops up regularly. Whatever pair you find while it's active scores ${BONUS_POINTS} instead.` },
+    { icon: "⏱️", text: `The board unlocks after a ${countdownSeconds}-second countdown — cards will shuffle on screen while you wait.` },
+  ];
+  if (timerSeconds > 0) rows.push({ icon: "⏳", text: `You have ${fmtTime(timerSeconds)} to find as many pairs as you can before time's up.` });
+  else rows.push({ icon: "🎯", text: `No overall time limit — take your time and try to keep your move count low.` });
+  return (
+    <div>
+      {rows.map((r, i) => (
+        <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 16 }}>
+          <span style={{ fontSize: 22, lineHeight: 1 }}>{r.icon}</span>
+          <p style={{ margin: 0, fontSize: 14, color: COLORS.cream, lineHeight: 1.5 }}>{r.text}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function InstructionsScreen({ game, onStart }) {
+  return (
+    <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", marginTop: "7vh" }}>
+      <p className="ip-display" style={{ color: CREAM_MUTED, fontSize: 13, letterSpacing: 1, textTransform: "uppercase", margin: "0 0 8px" }}>Before you start</p>
+      <h1 className="ip-display ip-gradient-text" style={{ fontSize: 34, fontWeight: 800, margin: "0 0 28px", textAlign: "center" }}>How to play</h1>
+      <Panel maxWidth={440}>
+        <InstructionsContent game={game} />
+        <PrimaryButton onClick={onStart} full style={{ marginTop: 8 }}>I'm ready — start the countdown</PrimaryButton>
+      </Panel>
+    </div>
+  );
+}
+
+function InstructionsButton({ onClick }) {
+  return (
+    <button className="ip-btn" onClick={onClick} title="View instructions" style={{
+      position: "fixed", top: 18, left: 18, zIndex: 40, background: "rgba(20,20,43,0.7)", backdropFilter: "blur(8px)",
+      border: `1px solid ${PANEL_BORDER}`, borderRadius: 999, padding: "9px 16px", color: COLORS.gold, fontSize: 13, fontWeight: 700,
+      display: "flex", alignItems: "center", gap: 6,
+    }}>❓ Instructions</button>
+  );
+}
+
+function InstructionsOverlay({ game, onClose }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(10,10,20,0.75)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()}>
+        <Panel maxWidth={440}>
+          <p className="ip-display" style={{ color: COLORS.gold, fontSize: 13, letterSpacing: 1, textTransform: "uppercase", margin: "0 0 14px" }}>How to play</p>
+          <InstructionsContent game={game} />
+          <PrimaryButton onClick={onClose} full style={{ marginTop: 8 }}>Got it</PrimaryButton>
+        </Panel>
+      </div>
+    </div>
+  );
 }
 
 /* ---------------------------------------------------------
@@ -434,6 +522,56 @@ function PlayerLogin({ game, onPlay, onBack }) {
 }
 
 /* ---------------------------------------------------------
+   COUNTDOWN (with real-time card shuffle)
+--------------------------------------------------------- */
+
+function CountdownScreen({ game, onDone, onShowInstructions }) {
+  const seconds = game.countdownSeconds ?? DEFAULT_COUNTDOWN_SECONDS;
+  const [count, setCount] = useState(seconds);
+  const [order, setOrder] = useState(() => shuffle(Array.from({ length: Math.min(game.cardCount, 30) }, (_, i) => i)));
+
+  useEffect(() => {
+    const shuffleId = setInterval(() => setOrder((o) => shuffle(o)), 480);
+    const countId = setInterval(() => {
+      setCount((c) => {
+        if (c <= 1) { clearInterval(countId); clearInterval(shuffleId); setTimeout(onDone, 350); return 0; }
+        return c - 1;
+      });
+    }, 1000);
+    return () => { clearInterval(shuffleId); clearInterval(countId); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const cols = Math.max(4, Math.min(8, Math.ceil(Math.sqrt(order.length * 1.4))));
+
+  return (
+    <div style={{ width: "100%", maxWidth: 700, display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
+      <InstructionsButton onClick={onShowInstructions} />
+      <p className="ip-display" style={{ color: CREAM_MUTED, fontSize: 13, margin: "0 0 4px" }}>Get ready</p>
+      <h2 className="ip-display" style={{ color: COLORS.cream, fontSize: 22, fontWeight: 700, margin: "0 0 20px", textAlign: "center" }}>{game.name}</h2>
+      <div style={{ position: "relative", width: "100%" }}>
+        <div style={{ width: "100%", display: "grid", gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 8, opacity: 0.55 }}>
+          {order.map((id) => (
+            <motion.div key={id} layout transition={{ type: "spring", stiffness: 260, damping: 22 }} style={{ aspectRatio: "3 / 4" }}>
+              <div style={{
+                width: "100%", height: "100%", borderRadius: 10,
+                background: "repeating-linear-gradient(45deg, rgba(242,169,59,0.08) 0px, rgba(242,169,59,0.08) 2px, transparent 2px, transparent 12px), linear-gradient(145deg, #26265a, #14142B)",
+                border: "1px solid rgba(242,169,59,0.4)",
+              }} />
+            </motion.div>
+          ))}
+        </div>
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20 }}>
+          <span key={count} className="ip-display ip-countdown-pop" style={{
+            fontSize: 110, fontWeight: 800, color: COLORS.gold, textShadow: "0 10px 40px rgba(0,0,0,0.6)",
+          }}>{count > 0 ? count : "GO!"}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
    GAME BOARD
 --------------------------------------------------------- */
 
@@ -451,10 +589,7 @@ function LiveTicker({ code }) {
   const [entry, setEntry] = useState(null);
   useEffect(() => {
     let stop = false;
-    const poll = async () => {
-      const feed = await loadJSON("activity-" + code, []);
-      if (!stop && feed.length) setEntry(feed[feed.length - 1]);
-    };
+    const poll = async () => { const feed = await loadJSON("activity-" + code, []); if (!stop && feed.length) setEntry(feed[feed.length - 1]); };
     poll();
     const id = setInterval(poll, 4500);
     return () => { stop = true; clearInterval(id); };
@@ -467,7 +602,6 @@ function LiveTicker({ code }) {
     }}>🟢 {entry.name} {entry.text}</div>
   );
 }
-
 async function pushActivity(code, name, text) {
   try {
     const key = "activity-" + code;
@@ -497,13 +631,17 @@ function GameBoard({ game, playerName, onExit }) {
   const [showBonusBanner, setShowBonusBanner] = useState(false);
   const [celebration, setCelebration] = useState(null);
   const [goldFlash, setGoldFlash] = useState(null);
+  const [showInstructions, setShowInstructions] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
   const timerRef = useRef(null);
   const startedRef = useRef(false);
-  const lastBonusTurnRef = useRef(0);
+  const lastBonusSecondRef = useRef(0);
   const audio = useGameAudio();
 
+  const timerSeconds = game.timerSeconds || 0;
   const totalPairs = cards.length / 2;
   const matchedCount = Object.keys(matched).length / 2;
+  const remaining = timerSeconds > 0 ? Math.max(0, timerSeconds - seconds) : null;
 
   useEffect(() => {
     audio.boot();
@@ -513,25 +651,35 @@ function GameBoard({ game, playerName, onExit }) {
   }, []);
 
   useEffect(() => {
-    if (moves > 0 && moves % BONUS_EVERY_TURNS === 0 && moves !== lastBonusTurnRef.current && !finished) {
-      lastBonusTurnRef.current = moves;
+    if (seconds > 0 && seconds % BONUS_INTERVAL_SECONDS === 0 && seconds !== lastBonusSecondRef.current && !finished) {
+      lastBonusSecondRef.current = seconds;
       setDoubleActive(true); setShowBonusBanner(true); audio.playBonus();
-      setTimeout(() => setShowBonusBanner(false), 4200);
+      setTimeout(() => setShowBonusBanner(false), 2600);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moves]);
+  }, [seconds]);
 
   useEffect(() => {
     if (matchedCount === totalPairs && totalPairs > 0 && !finished && !startedRef.current) {
       startedRef.current = true;
       clearInterval(timerRef.current);
       audio.playWin();
-      finishGame();
+      finishGame(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchedCount]);
 
-  async function finishGame() {
+  useEffect(() => {
+    if (timerSeconds > 0 && remaining === 0 && !finished && !startedRef.current) {
+      startedRef.current = true;
+      clearInterval(timerRef.current);
+      setTimedOut(true);
+      finishGame(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remaining]);
+
+  async function finishGame(outOfTime) {
     setFinished(true);
     const entry = { name: playerName, moves, seconds, score, at: Date.now() };
     const key = "leaderboard-" + game.code;
@@ -545,12 +693,12 @@ function GameBoard({ game, playerName, onExit }) {
       audio.playHighScore();
       pushActivity(game.code, playerName, `just set a new high score — ${score} pts!`);
     } else {
-      pushActivity(game.code, playerName, `finished with ${score} pts`);
+      pushActivity(game.code, playerName, outOfTime ? `ran out of time with ${score} pts` : `finished with ${score} pts`);
     }
   }
 
   const handleClick = (idx) => {
-    if (locked) return;
+    if (locked || finished) return;
     const card = cards[idx];
     if (matched[card.uid] || flipped.includes(idx)) return;
     if (flipped.length === 2) return;
@@ -570,11 +718,7 @@ function GameBoard({ game, playerName, onExit }) {
           setBurst(c1.uid + "-" + Date.now());
           setCelebration(c1.uid + "-" + Date.now());
           setScore((s) => s + points);
-          setStreak((st) => {
-            const next = st + 1;
-            if (next >= 2) audio.playStreak();
-            return next;
-          });
+          setStreak((st) => { const nx = st + 1; if (nx >= 2) audio.playStreak(); return nx; });
           if (earnDouble) { setDoubleActive(false); audio.playDoubleMatch(); setGoldFlash(c1.uid + "-flash-" + Date.now()); }
           else audio.playMatch();
           pushActivity(game.code, playerName, `matched ${c1.label} & ${c2.label}${earnDouble ? " for a double!" : ""}`);
@@ -594,22 +738,22 @@ function GameBoard({ game, playerName, onExit }) {
 
   if (finished) {
     const efficiency = totalPairs / Math.max(moves, 1);
-    const tier = efficiency >= 0.8 ? "Lightning fast" : efficiency >= 0.5 ? "Great pace" : "Nailed it";
+    const tier = timedOut ? "Time's up" : efficiency >= 0.8 ? "Lightning fast" : efficiency >= 0.5 ? "Great pace" : "Nailed it";
     return (
       <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", marginTop: "6vh", position: "relative" }}>
         <FinishConfetti big={isTopScore} />
         <div style={{ width: 64, height: 64, borderRadius: "50%", background: `linear-gradient(145deg, ${COLORS.gold}, ${COLORS.coral})`, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14, boxShadow: "0 12px 30px rgba(242,169,59,0.4)" }}>
-          <span style={{ fontSize: 28 }}>{isTopScore ? "👑" : "🎉"}</span>
+          <span style={{ fontSize: 28 }}>{isTopScore ? "👑" : timedOut ? "⏱️" : "🎉"}</span>
         </div>
         {isTopScore && <p className="ip-display" style={{ color: COLORS.gold, fontSize: 14, letterSpacing: 1, textTransform: "uppercase", margin: "0 0 4px", fontWeight: 800 }}>New high score!</p>}
         <p className="ip-display" style={{ color: COLORS.gold, fontSize: 13, letterSpacing: 1, textTransform: "uppercase", margin: "0 0 8px" }}>{tier}</p>
         <h1 className="ip-display ip-gradient-text" style={{ fontSize: 40, fontWeight: 800, margin: "0 0 6px", textAlign: "center" }}>{score} points</h1>
-        <p style={{ color: CREAM_MUTED, fontSize: 15, margin: "0 0 24px" }}>Nice work, {playerName.split(" ")[0]}</p>
+        <p style={{ color: CREAM_MUTED, fontSize: 15, margin: "0 0 24px" }}>{timedOut ? `Time ran out, ${playerName.split(" ")[0]} — ` : "Nice work, "}{!timedOut && playerName.split(" ")[0]}{timedOut && `${matchedCount}/${totalPairs} pairs found`}</p>
         <Panel maxWidth={420}>
           <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
             <StatBlock label="Time" value={fmtTime(seconds)} />
             <StatBlock label="Moves" value={moves} />
-            <StatBlock label="Pairs" value={totalPairs} />
+            <StatBlock label="Pairs" value={`${matchedCount}/${totalPairs}`} />
           </div>
           <p style={{ fontSize: 13, color: CREAM_MUTED, margin: "0 0 10px", fontWeight: 600 }}>Leaderboard</p>
           <div style={{ maxHeight: 220, overflowY: "auto", marginBottom: 20 }}>
@@ -630,6 +774,8 @@ function GameBoard({ game, playerName, onExit }) {
     <div style={{ width: "100%", maxWidth: 980, display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
       <GoldFlash triggerKey={goldFlash} />
       <LiveTicker code={game.code} />
+      <InstructionsButton onClick={() => setShowInstructions(true)} />
+      {showInstructions && <InstructionsOverlay game={game} onClose={() => setShowInstructions(false)} />}
       <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 12, marginTop: 22 }}>
         <div>
           <p className="ip-display" style={{ color: COLORS.cream, fontSize: 12, opacity: 0.65, margin: 0 }}>{game.name}</p>
@@ -637,7 +783,7 @@ function GameBoard({ game, playerName, onExit }) {
         </div>
         <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
           <MiniStat label="Score" value={score} highlight />
-          <MiniStat label="Time" value={fmtTime(seconds)} />
+          <MiniStat label={timerSeconds > 0 ? "Time left" : "Time"} value={timerSeconds > 0 ? fmtTime(remaining) : fmtTime(seconds)} warn={timerSeconds > 0 && remaining <= 20} />
           <MiniStat label="Moves" value={moves} />
           <button className="ip-btn" onClick={audio.toggleMute} title={audio.muted ? "Unmute" : "Mute"} style={{ background: "rgba(247,244,239,0.08)", border: "1px solid rgba(247,244,239,0.25)", borderRadius: 8, width: 34, height: 34, color: COLORS.cream, fontSize: 15 }}>{audio.muted ? "🔇" : "🔊"}</button>
         </div>
@@ -696,50 +842,53 @@ function StatBlock({ label, value }) {
     </div>
   );
 }
-function MiniStat({ label, value, highlight }) {
+function MiniStat({ label, value, highlight, warn }) {
   return (
     <div style={{ textAlign: "right" }}>
-      <p className="ip-display" style={{ fontSize: 18, fontWeight: 700, color: highlight ? COLORS.gold : COLORS.cream, margin: 0 }}>{value}</p>
+      <p className="ip-display" style={{ fontSize: 18, fontWeight: 700, color: warn ? COLORS.coral : highlight ? COLORS.gold : COLORS.cream, margin: 0 }}>{value}</p>
       <p style={{ fontSize: 10, color: "rgba(247,244,239,0.55)", margin: 0, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</p>
     </div>
   );
 }
 
 /* ---------------------------------------------------------
-   ADMIN CONSOLE — same file as the player app so storage is
-   guaranteed to be shared, but reached only via a #admin
-   link that isn't shown anywhere in the player UI, and it
-   renders as a completely separate full-screen console with
-   no player chrome.
+   ADMIN CONSOLE
 --------------------------------------------------------- */
 
 const ADMIN_TABS = [
   { id: "create", label: "Create link" }, { id: "links", label: "Your links" },
-  { id: "pairs", label: "Pairs library" }, { id: "background", label: "Background" }, { id: "count", label: "Card count" },
+  { id: "pairs", label: "Pairs library" }, { id: "background", label: "Background" },
+  { id: "count", label: "Card count" }, { id: "countdown", label: "Countdown" }, { id: "timer", label: "Game timer" },
 ];
 
 function AdminPanel({ onExit }) {
   const [tab, setTab] = useState("create");
-  const [library, setLibrary] = useState(null);
+  const [categories, setCategories] = useState(null);
   const [background, setBackground] = useState(null);
   const [cardCount, setCardCount] = useState(20);
+  const [countdownSeconds, setCountdownSeconds] = useState(DEFAULT_COUNTDOWN_SECONDS);
+  const [timerSeconds, setTimerSeconds] = useState(DEFAULT_TIMER_SECONDS);
   const [games, setGames] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
-      const lib = await loadJSON("pairs-library", DEFAULT_PAIRS);
+      const cats = await loadJSON("pairs-categories", DEFAULT_CATEGORIES);
       const bg = await loadJSON("background-settings", BACKGROUND_PRESETS[0]);
       const cc = await loadJSON("card-count-setting", 20);
+      const cd = await loadJSON("countdown-seconds", DEFAULT_COUNTDOWN_SECONDS);
+      const gt = await loadJSON("game-timer-seconds", DEFAULT_TIMER_SECONDS);
       const idx = await loadJSON("games-index", []);
-      setLibrary(lib); setBackground(bg); setCardCount(cc); setGames(idx); setLoading(false);
+      setCategories(cats); setBackground(bg); setCardCount(cc); setCountdownSeconds(cd); setTimerSeconds(gt); setGames(idx); setLoading(false);
     })();
   }, []);
 
   if (loading) return <p style={{ color: COLORS.cream }}>Loading admin panel…</p>;
 
+  const totalPairs = Object.values(categories).reduce((sum, arr) => sum + arr.length, 0);
+
   return (
-    <div style={{ width: "100%", maxWidth: 760 }}>
+    <div style={{ width: "100%", maxWidth: 800 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
         <div>
           <p className="ip-display" style={{ color: COLORS.gold, fontSize: 12, letterSpacing: 2, textTransform: "uppercase", margin: "0 0 4px" }}>Iconic Pairs</p>
@@ -752,24 +901,35 @@ function AdminPanel({ onExit }) {
           <button key={t.id} className="ip-btn" onClick={() => setTab(t.id)} style={{ background: tab === t.id ? COLORS.gold : "rgba(247,244,239,0.1)", color: tab === t.id ? COLORS.navy : COLORS.cream, border: "none", borderRadius: 10, padding: "9px 14px", fontSize: 13 }}>{t.label}</button>
         ))}
       </div>
-      <Panel maxWidth={760}>
-        {tab === "create" && <CreateLinkTab library={library} background={background} cardCount={cardCount} games={games} setGames={setGames} />}
+      <Panel maxWidth={800}>
+        {tab === "create" && <CreateLinkTab categories={categories} background={background} cardCount={cardCount} countdownSeconds={countdownSeconds} timerSeconds={timerSeconds} games={games} setGames={setGames} />}
         {tab === "links" && <LinksTab games={games} />}
-        {tab === "pairs" && <PairsTab library={library} setLibrary={setLibrary} />}
+        {tab === "pairs" && <CategoriesTab categories={categories} setCategories={setCategories} />}
         {tab === "background" && <BackgroundTab background={background} setBackground={setBackground} />}
-        {tab === "count" && <CardCountTab cardCount={cardCount} setCardCount={setCardCount} maxPairs={library.length} />}
+        {tab === "count" && <CardCountTab cardCount={cardCount} setCardCount={setCardCount} maxPairs={totalPairs} />}
+        {tab === "countdown" && <CountdownTab countdownSeconds={countdownSeconds} setCountdownSeconds={setCountdownSeconds} />}
+        {tab === "timer" && <GameTimerTab timerSeconds={timerSeconds} setTimerSeconds={setTimerSeconds} />}
       </Panel>
     </div>
   );
 }
 
-function CreateLinkTab({ library, background, cardCount, games, setGames }) {
-  const [name, setName] = useState(""); const [created, setCreated] = useState(null); const [saving, setSaving] = useState(false);
+function CreateLinkTab({ categories, background, cardCount, countdownSeconds, timerSeconds, games, setGames }) {
+  const [name, setName] = useState("");
+  const [selectedCats, setSelectedCats] = useState(() => Object.fromEntries(CATEGORY_NAMES.map((c) => [c, true])));
+  const [created, setCreated] = useState(null); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+
+  const toggleCat = (cat) => setSelectedCats((s) => ({ ...s, [cat]: !s[cat] }));
+  const allOn = () => setSelectedCats(Object.fromEntries(CATEGORY_NAMES.map((c) => [c, true])));
+  const allOff = () => setSelectedCats(Object.fromEntries(CATEGORY_NAMES.map((c) => [c, false])));
+
   const create = async () => {
     if (!name.trim()) return;
-    setSaving(true);
+    const pool = CATEGORY_NAMES.filter((c) => selectedCats[c]).flatMap((c) => categories[c] || []);
+    if (pool.length < 2) { setError("Select at least one category with pairs."); return; }
+    setError(""); setSaving(true);
     const code = uid(5);
-    const game = { code, name: name.trim(), background, cardCount, pairs: library, createdAt: Date.now() };
+    const game = { code, name: name.trim(), background, cardCount, countdownSeconds, timerSeconds, pairs: pool, createdAt: Date.now() };
     await saveJSON("game-" + code, game);
     const idxEntry = { code, name: game.name, createdAt: game.createdAt, cardCount };
     const newIndex = [idxEntry, ...(games || [])];
@@ -777,14 +937,31 @@ function CreateLinkTab({ library, background, cardCount, games, setGames }) {
     setGames(newIndex); setCreated(game); setName(""); setSaving(false);
   };
   const link = created ? `${window.location.href.split("#")[0]}#play-${created.code}` : "";
+
   return (
     <div>
       <p style={{ fontSize: 13, color: COLORS.cream, opacity: 0.85, margin: "0 0 4px", fontWeight: 600 }}>Activity name</p>
-      <p style={{ fontSize: 12, color: CREAM_MUTED, margin: "0 0 12px" }}>New links use the current pairs library, background and card count — set those in the other tabs first.</p>
-      <div style={{ display: "flex", gap: 10, marginBottom: 4 }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
         <input className="ip-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme Offsite — Icebreaker" style={{ flex: 1, ...inputStyle(false), fontSize: 14 }} />
         <PrimaryButton onClick={create} disabled={saving || !name.trim()}>Create link</PrimaryButton>
       </div>
+
+      <p style={{ fontSize: 13, color: COLORS.cream, opacity: 0.85, margin: "0 0 4px", fontWeight: 600 }}>Pair categories to include</p>
+      <p style={{ fontSize: 12, color: CREAM_MUTED, margin: "0 0 10px" }}>Pick which themed sets feed into this link's board (edit each set's pairs under "Pairs library").</p>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <GhostButton onClick={allOn}>Select all</GhostButton>
+        <GhostButton onClick={allOff}>Select none</GhostButton>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8, marginBottom: 8 }}>
+        {CATEGORY_NAMES.map((cat) => (
+          <label key={cat} style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(247,244,239,0.05)", borderRadius: 8, padding: "8px 10px", cursor: "pointer", fontSize: 13, color: COLORS.cream }}>
+            <input type="checkbox" checked={!!selectedCats[cat]} onChange={() => toggleCat(cat)} />
+            {cat} <span style={{ color: CREAM_FAINT, fontSize: 11 }}>({(categories[cat] || []).length})</span>
+          </label>
+        ))}
+      </div>
+      {error && <p style={{ color: COLORS.coral, fontSize: 12, margin: "4px 0 0" }}>{error}</p>}
+
       {created && (
         <div className="ip-fade-in" style={{ marginTop: 20, padding: 16, background: "rgba(46,196,182,0.12)", borderRadius: 12, border: "1px solid rgba(46,196,182,0.35)" }}>
           <p style={{ fontSize: 13, fontWeight: 600, color: COLORS.cream, margin: "0 0 8px" }}>Link ready</p>
@@ -792,7 +969,7 @@ function CreateLinkTab({ library, background, cardCount, games, setGames }) {
             <input readOnly value={link} className="ip-input" style={{ flex: 1, ...inputStyle(false), fontSize: 12, padding: "9px 12px" }} />
             <GhostButton onClick={() => navigator.clipboard?.writeText(link)}>Copy</GhostButton>
           </div>
-          <p style={{ fontSize: 12, color: CREAM_MUTED, margin: "10px 0 0" }}>Game code: <strong style={{ color: COLORS.cream }}>{created.code}</strong> — players can also type this in directly on the join screen.</p>
+          <p style={{ fontSize: 12, color: CREAM_MUTED, margin: "10px 0 0" }}>Game code: <strong style={{ color: COLORS.cream }}>{created.code}</strong></p>
         </div>
       )}
     </div>
@@ -835,19 +1012,36 @@ function LinksTab({ games }) {
   );
 }
 
-function PairsTab({ library, setLibrary }) {
+function CategoriesTab({ categories, setCategories }) {
+  const [activeCat, setActiveCat] = useState(CATEGORY_NAMES[0]);
   const [a, setA] = useState(""); const [b, setB] = useState(""); const [saving, setSaving] = useState(false);
-  const persist = async (next) => { setSaving(true); setLibrary(next); await saveJSON("pairs-library", next); setSaving(false); };
-  const add = () => { if (!a.trim() || !b.trim()) return; persist([...library, { id: "p" + Date.now(), a: a.trim(), b: b.trim() }]); setA(""); setB(""); };
-  const remove = (id) => persist(library.filter((p) => p.id !== id));
-  const resetDefaults = () => persist(DEFAULT_PAIRS);
+  const list = categories[activeCat] || [];
+
+  const persist = async (nextList) => {
+    setSaving(true);
+    const next = { ...categories, [activeCat]: nextList };
+    setCategories(next);
+    await saveJSON("pairs-categories", next);
+    setSaving(false);
+  };
+  const add = () => { if (!a.trim() || !b.trim()) return; persist([...list, { id: activeCat.replace(/\s+/g, "") + "-" + Date.now(), a: a.trim(), b: b.trim() }]); setA(""); setB(""); };
+  const remove = (id) => persist(list.filter((p) => p.id !== id));
+  const resetCat = () => persist(DEFAULT_CATEGORIES[activeCat]);
+
   return (
     <div>
-      <p style={{ fontSize: 12, color: CREAM_MUTED, margin: "0 0 4px" }}>{library.length} pairs in the library ({library.length * 2} cards max). New links snapshot this list.</p>
-      <p style={{ fontSize: 12, color: CREAM_FAINT, margin: "0 0 14px" }}>Icons are auto-assigned as you type — common words get their real icon, unusual ones get a themed fallback.</p>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+        {CATEGORY_NAMES.map((cat) => (
+          <button key={cat} className="ip-btn" onClick={() => setActiveCat(cat)} style={{
+            background: activeCat === cat ? COLORS.teal : "rgba(247,244,239,0.08)", color: activeCat === cat ? COLORS.navy : COLORS.cream,
+            border: "none", borderRadius: 8, padding: "7px 12px", fontSize: 12,
+          }}>{cat} ({(categories[cat] || []).length})</button>
+        ))}
+      </div>
+      <p style={{ fontSize: 12, color: CREAM_MUTED, margin: "0 0 14px" }}>Editing <strong style={{ color: COLORS.cream }}>{activeCat}</strong> — {list.length} pairs ({list.length * 2} cards). Icons are auto-assigned as you type.</p>
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-        <input className="ip-input" value={a} onChange={(e) => setA(e.target.value)} placeholder="Salt" style={{ flex: 1, ...inputStyle(false), padding: "10px 12px", fontSize: 13 }} />
-        <input className="ip-input" value={b} onChange={(e) => setB(e.target.value)} placeholder="Pepper" style={{ flex: 1, ...inputStyle(false), padding: "10px 12px", fontSize: 13 }} />
+        <input className="ip-input" value={a} onChange={(e) => setA(e.target.value)} placeholder="First item" style={{ flex: 1, ...inputStyle(false), padding: "10px 12px", fontSize: 13 }} />
+        <input className="ip-input" value={b} onChange={(e) => setB(e.target.value)} placeholder="Second item" style={{ flex: 1, ...inputStyle(false), padding: "10px 12px", fontSize: 13 }} />
         <PrimaryButton onClick={add} disabled={saving || !a.trim() || !b.trim()}>Add pair</PrimaryButton>
       </div>
       {(a.trim() || b.trim()) && (
@@ -856,14 +1050,14 @@ function PairsTab({ library, setLibrary }) {
         </p>
       )}
       <div style={{ maxHeight: 320, overflowY: "auto" }}>
-        {library.map((p) => (
+        {list.map((p) => (
           <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 4px", borderBottom: "1px solid rgba(247,244,239,0.08)" }}>
             <span style={{ fontSize: 13, color: COLORS.cream }}>{iconFor(p.a)} {p.a} &nbsp;·&nbsp; {iconFor(p.b)} {p.b}</span>
             <button className="ip-btn" onClick={() => remove(p.id)} style={{ background: "none", border: "none", color: COLORS.coral, fontSize: 12 }}>Remove</button>
           </div>
         ))}
       </div>
-      <GhostButton onClick={resetDefaults} style={{ marginTop: 14 }}>Reset to default 25 pairs</GhostButton>
+      <GhostButton onClick={resetCat} style={{ marginTop: 14 }}>Reset "{activeCat}" to default 10 pairs</GhostButton>
     </div>
   );
 }
@@ -909,7 +1103,41 @@ function CardCountTab({ cardCount, setCardCount, maxPairs }) {
           <button key={n} className="ip-btn" onClick={() => persist(n)} disabled={saving || n > max} style={{ background: cardCount === n ? COLORS.gold : "rgba(247,244,239,0.1)", color: cardCount === n ? COLORS.navy : COLORS.cream, border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13 }}>{n}</button>
         ))}
       </div>
-      <p style={{ fontSize: 11, color: CREAM_FAINT, margin: 0 }}>Your pairs library currently supports up to {max} cards ({maxPairs} pairs). Add more pairs to unlock higher counts.</p>
+      <p style={{ fontSize: 11, color: CREAM_FAINT, margin: 0 }}>Your combined categories currently support up to {max} cards ({maxPairs} pairs). Add more pairs to unlock higher counts.</p>
+    </div>
+  );
+}
+
+function CountdownTab({ countdownSeconds, setCountdownSeconds }) {
+  const [saving, setSaving] = useState(false);
+  const persist = async (val) => { setSaving(true); setCountdownSeconds(val); await saveJSON("countdown-seconds", val); setSaving(false); };
+  const presets = [5, 10, 15, 20];
+  return (
+    <div>
+      <p style={{ fontSize: 12, color: CREAM_MUTED, margin: "0 0 4px" }}>How long players wait — with a live card-shuffle animation — before the board unlocks.</p>
+      <p style={{ fontSize: 12, color: CREAM_FAINT, margin: "0 0 16px" }}>Sets the default for the next links you create.</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {presets.map((n) => (
+          <button key={n} className="ip-btn" onClick={() => persist(n)} disabled={saving} style={{ background: countdownSeconds === n ? COLORS.gold : "rgba(247,244,239,0.1)", color: countdownSeconds === n ? COLORS.navy : COLORS.cream, border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13 }}>{n}s</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GameTimerTab({ timerSeconds, setTimerSeconds }) {
+  const [saving, setSaving] = useState(false);
+  const persist = async (val) => { setSaving(true); setTimerSeconds(val); await saveJSON("game-timer-seconds", val); setSaving(false); };
+  const presets = [{ label: "No limit", val: 0 }, { label: "2 min", val: 120 }, { label: "3 min", val: 180 }, { label: "4 min", val: 240 }, { label: "5 min", val: 300 }];
+  return (
+    <div>
+      <p style={{ fontSize: 12, color: CREAM_MUTED, margin: "0 0 4px" }}>An optional overall time limit — the game ends automatically (and locks in whatever score the player has) when it runs out.</p>
+      <p style={{ fontSize: 12, color: CREAM_FAINT, margin: "0 0 16px" }}>Sets the default for the next links you create.</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {presets.map((p) => (
+          <button key={p.val} className="ip-btn" onClick={() => persist(p.val)} disabled={saving} style={{ background: timerSeconds === p.val ? COLORS.gold : "rgba(247,244,239,0.1)", color: timerSeconds === p.val ? COLORS.navy : COLORS.cream, border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13 }}>{p.label}</button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -922,6 +1150,7 @@ export default function App() {
   const [view, setView] = useState("loading");
   const [activeGame, setActiveGame] = useState(null);
   const [playerName, setPlayerName] = useState("");
+  const [showInstructionsOverlay, setShowInstructionsOverlay] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -959,7 +1188,16 @@ export default function App() {
       </Shell>
     );
   }
-  if (view === "player-login") return <Shell background={bg}><PlayerLogin game={activeGame} onPlay={(n) => { setPlayerName(n); setView("game"); }} onBack={goJoin} /></Shell>;
+  if (view === "player-login") return <Shell background={bg}><PlayerLogin game={activeGame} onPlay={(n) => { setPlayerName(n); setView("instructions"); }} onBack={goJoin} /></Shell>;
+  if (view === "instructions") return <Shell background={bg}><InstructionsScreen game={activeGame} onStart={() => setView("countdown")} /></Shell>;
+  if (view === "countdown") {
+    return (
+      <Shell background={bg}>
+        <CountdownScreen game={activeGame} onDone={() => setView("game")} onShowInstructions={() => setShowInstructionsOverlay(true)} />
+        {showInstructionsOverlay && <InstructionsOverlay game={activeGame} onClose={() => setShowInstructionsOverlay(false)} />}
+      </Shell>
+    );
+  }
   if (view === "game") return <Shell background={bg}><GameBoard game={activeGame} playerName={playerName} onExit={goJoin} /></Shell>;
   return null;
 }
