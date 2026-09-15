@@ -206,10 +206,11 @@ async function saveJSON(key, value) {
    AUDIO
 --------------------------------------------------------- */
 
-function useGameAudio() {
+function useGameAudio(musicConfig) {
   const nodesRef = useRef([]);
   const synthRef = useRef(null);
   const startedRef = useRef(false);
+  const audioElRef = useRef(null);
   const [muted, setMuted] = useState(false);
 
   const boot = async () => {
@@ -217,27 +218,40 @@ function useGameAudio() {
     startedRef.current = true;
     try {
       await Tone.start();
-      Tone.Transport.bpm.value = 118;
-      const kick = new Tone.MembraneSynth({ pitchDecay: 0.03, octaves: 5, envelope: { attack: 0.001, decay: 0.35, sustain: 0 } }).toDestination();
-      kick.volume.value = -6;
-      const kickLoop = new Tone.Loop((t) => kick.triggerAttackRelease("C2", "8n", t), "4n").start(0);
-      const hat = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.045, sustain: 0 } }).toDestination();
-      hat.volume.value = -18;
-      const hatLoop = new Tone.Loop((t) => hat.triggerAttackRelease("16n", t), "8n").start("8n");
-      const bass = new Tone.Synth({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.25, release: 0.25 } }).toDestination();
-      bass.volume.value = -12;
-      const bassNotes = ["C3", "A2", "F2", "G2"];
-      let bi = 0;
-      const bassLoop = new Tone.Loop((t) => { bass.triggerAttackRelease(bassNotes[bi % 4], "2n", t); bi++; }, "1m").start(0);
-      const arp = new Tone.Synth({ oscillator: { type: "triangle" }, envelope: { attack: 0.004, decay: 0.18, sustain: 0.05, release: 0.15 } }).toDestination();
-      arp.volume.value = -9;
-      const arpPattern = ["C5", "E5", "G5", "E5", "A4", "C5", "E5", "C5", "F4", "A4", "C5", "A4", "G4", "B4", "D5", "B4"];
-      const arpSeq = new Tone.Sequence((t, note) => arp.triggerAttackRelease(note, "8n", t), arpPattern, "8n").start(0);
-      Tone.Transport.start();
       const synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "triangle" }, envelope: { attack: 0.01, decay: 0.25, sustain: 0.05, release: 0.6 } }).toDestination();
       synth.volume.value = -3;
       synthRef.current = synth;
-      nodesRef.current = [kick, kickLoop, hat, hatLoop, bass, bassLoop, arp, arpSeq, synth];
+
+      if (musicConfig && musicConfig.type === "custom" && musicConfig.url) {
+        // Custom background track supplied by the admin
+        try {
+          const el = new Audio(musicConfig.url);
+          el.loop = true;
+          el.volume = 0.35;
+          el.play().catch(() => {});
+          audioElRef.current = el;
+        } catch (e) {}
+      } else {
+        // Built-in generated soundtrack (always available as the default)
+        Tone.Transport.bpm.value = 118;
+        const kick = new Tone.MembraneSynth({ pitchDecay: 0.03, octaves: 5, envelope: { attack: 0.001, decay: 0.35, sustain: 0 } }).toDestination();
+        kick.volume.value = -6;
+        const kickLoop = new Tone.Loop((t) => kick.triggerAttackRelease("C2", "8n", t), "4n").start(0);
+        const hat = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.045, sustain: 0 } }).toDestination();
+        hat.volume.value = -18;
+        const hatLoop = new Tone.Loop((t) => hat.triggerAttackRelease("16n", t), "8n").start("8n");
+        const bass = new Tone.Synth({ oscillator: { type: "sawtooth" }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.25, release: 0.25 } }).toDestination();
+        bass.volume.value = -12;
+        const bassNotes = ["C3", "A2", "F2", "G2"];
+        let bi = 0;
+        const bassLoop = new Tone.Loop((t) => { bass.triggerAttackRelease(bassNotes[bi % 4], "2n", t); bi++; }, "1m").start(0);
+        const arp = new Tone.Synth({ oscillator: { type: "triangle" }, envelope: { attack: 0.004, decay: 0.18, sustain: 0.05, release: 0.15 } }).toDestination();
+        arp.volume.value = -9;
+        const arpPattern = ["C5", "E5", "G5", "E5", "A4", "C5", "E5", "C5", "F4", "A4", "C5", "A4", "G4", "B4", "D5", "B4"];
+        const arpSeq = new Tone.Sequence((t, note) => arp.triggerAttackRelease(note, "8n", t), arpPattern, "8n").start(0);
+        Tone.Transport.start();
+        nodesRef.current = [kick, kickLoop, hat, hatLoop, bass, bassLoop, arp, arpSeq];
+      }
     } catch (e) {}
   };
   const stop = () => {
@@ -245,6 +259,8 @@ function useGameAudio() {
       nodesRef.current.forEach((n) => { n.stop?.(); n.dispose?.(); });
       nodesRef.current = [];
       Tone.Transport.stop(); Tone.Transport.cancel();
+      if (audioElRef.current) { audioElRef.current.pause(); audioElRef.current = null; }
+      synthRef.current?.dispose();
       startedRef.current = false;
     } catch (e) {}
   };
@@ -254,9 +270,18 @@ function useGameAudio() {
   const playWin = () => { try { synthRef.current?.triggerAttackRelease(["C5", "E5", "G5", "C6", "E6"], "2n"); } catch (e) {} };
   const playStreak = () => { try { synthRef.current?.triggerAttackRelease(["G5", "B5"], "16n"); } catch (e) {} };
   const playHighScore = () => { try { synthRef.current?.triggerAttackRelease(["C5", "E5", "G5", "C6", "E6", "G6"], "1n"); } catch (e) {} };
-  const playTick = () => { try { synthRef.current?.triggerAttackRelease("A4", "32n"); } catch (e) {} };
-  const toggleMute = () => { const next = !muted; setMuted(next); Tone.Destination.mute = next; };
-  return { boot, stop, playMatch, playBonus, playDoubleMatch, playWin, playStreak, playHighScore, playTick, muted, toggleMute };
+  const playWarning = () => {
+    try {
+      synthRef.current?.triggerAttackRelease("A4", "16n");
+      setTimeout(() => { try { synthRef.current?.triggerAttackRelease("A4", "16n"); } catch (e) {} }, 220);
+    } catch (e) {}
+  };
+  const toggleMute = () => {
+    const next = !muted; setMuted(next);
+    Tone.Destination.mute = next;
+    if (audioElRef.current) audioElRef.current.muted = next;
+  };
+  return { boot, stop, playMatch, playBonus, playDoubleMatch, playWin, playStreak, playHighScore, playWarning, muted, toggleMute };
 }
 
 /* ---------------------------------------------------------
@@ -355,8 +380,13 @@ function Shell({ background, children }) {
         @keyframes ip-ticker-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
         .ip-countdown-pop { animation: ip-countdown-pop 1s cubic-bezier(.2,.8,.3,1.1) both; }
         @keyframes ip-countdown-pop { 0% { opacity: 0; transform: scale(0.4); } 30% { opacity: 1; transform: scale(1.15); } 100% { opacity: 0; transform: scale(1.4); } }
+        .ip-instructions-highlight { animation: ip-instructions-glow 2.2s ease-in-out infinite; }
+        @keyframes ip-instructions-glow {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(242,169,59,0.5); }
+          50% { box-shadow: 0 0 0 8px rgba(242,169,59,0); }
+        }
         @media (prefers-reduced-motion: reduce) {
-          .ip-card-inner, .ip-card-matched, .ip-fade-in, .ip-drift-slow, .ip-glow-pulse, .ip-confetti-particle, .ip-toast-in, .ip-banner-in, .ip-celebrate-pop, .ip-gold-flash, .ip-ticker-in, .ip-countdown-pop { animation: none !important; transition: none !important; }
+          .ip-card-inner, .ip-card-matched, .ip-fade-in, .ip-drift-slow, .ip-glow-pulse, .ip-confetti-particle, .ip-toast-in, .ip-banner-in, .ip-celebrate-pop, .ip-gold-flash, .ip-ticker-in, .ip-countdown-pop, .ip-instructions-highlight { animation: none !important; transition: none !important; }
         }
       `}</style>
       <div className="ip-dotgrid" />
@@ -436,11 +466,11 @@ function InstructionsScreen({ game, onStart }) {
 
 function InstructionsButton({ onClick }) {
   return (
-    <button className="ip-btn" onClick={onClick} title="View instructions" style={{
-      position: "fixed", top: 18, left: 18, zIndex: 40, background: "rgba(20,20,43,0.7)", backdropFilter: "blur(8px)",
-      border: `1px solid ${PANEL_BORDER}`, borderRadius: 999, padding: "9px 16px", color: COLORS.gold, fontSize: 13, fontWeight: 700,
+    <button className="ip-btn ip-instructions-highlight" onClick={onClick} title="View instructions" style={{
+      position: "fixed", top: 18, left: 18, zIndex: 40, background: "rgba(242,169,59,0.16)", backdropFilter: "blur(8px)",
+      border: `1.5px solid ${COLORS.gold}`, borderRadius: 999, padding: "9px 18px", color: COLORS.gold, fontSize: 13, fontWeight: 700,
       display: "flex", alignItems: "center", gap: 6,
-    }}>❓ Instructions</button>
+    }}>Instructions</button>
   );
 }
 
@@ -498,10 +528,10 @@ function JoinScreen({ onJoin }) {
 }
 
 function PlayerLogin({ game, onPlay, onBack }) {
-  const [name, setName] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  const [name, setName] = useState(""); const [team, setTeam] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
   const submit = async () => {
     if (!name.trim()) { setError("Enter your name to play."); return; }
-    setBusy(true); await Tone.start().catch(() => {}); onPlay(name.trim());
+    setBusy(true); await Tone.start().catch(() => {}); onPlay(name.trim(), team.trim());
   };
   return (
     <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", marginTop: "8vh" }}>
@@ -511,7 +541,10 @@ function PlayerLogin({ game, onPlay, onBack }) {
       <Panel maxWidth={380}>
         <label style={{ display: "block", fontSize: 13, color: CREAM_MUTED, marginBottom: 8 }}>Your name</label>
         <input className="ip-input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder="Jordan Lee" autoFocus style={{ ...inputStyle(error), marginBottom: 8 }} />
+          placeholder="Jordan Lee" autoFocus style={{ ...inputStyle(error), marginBottom: 16 }} />
+        <label style={{ display: "block", fontSize: 13, color: CREAM_MUTED, marginBottom: 8 }}>Team (optional)</label>
+        <input className="ip-input" value={team} onChange={(e) => setTeam(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
+          placeholder="e.g. Falcons" style={{ ...inputStyle(false), marginBottom: 8 }} />
         {error && <p style={{ color: COLORS.coral, fontSize: 13, margin: "0 0 12px" }}>{error}</p>}
         <PrimaryButton onClick={submit} disabled={busy} full style={{ marginTop: 8 }}>🔊 Click to play</PrimaryButton>
         <p style={{ fontSize: 11, color: CREAM_FAINT, textAlign: "center", margin: "10px 0 0" }}>Turns on sound for this game — you can mute anytime.</p>
@@ -585,33 +618,51 @@ function buildBoard(pairs, cardCount) {
   return shuffle(cards);
 }
 
-function LiveTicker({ code }) {
-  const [entry, setEntry] = useState(null);
+function LiveSidebar({ code }) {
+  const [events, setEvents] = useState([]);
   useEffect(() => {
     let stop = false;
-    const poll = async () => { const feed = await loadJSON("activity-" + code, []); if (!stop && feed.length) setEntry(feed[feed.length - 1]); };
+    const poll = async () => {
+      const feed = await loadJSON("activity-" + code, []);
+      if (!stop) setEvents(feed.slice(-8).reverse());
+    };
     poll();
-    const id = setInterval(poll, 4500);
+    const id = setInterval(poll, 2500);
     return () => { stop = true; clearInterval(id); };
   }, [code]);
-  if (!entry) return null;
+
   return (
-    <div key={entry.at} className="ip-ticker-in" style={{
-      position: "absolute", top: 4, left: 0, zIndex: 24, background: "rgba(20,20,43,0.55)", border: "1px solid rgba(247,244,239,0.15)",
-      color: CREAM_MUTED, fontSize: 12, padding: "6px 12px", borderRadius: 999, maxWidth: 260, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-    }}>🟢 {entry.name} {entry.text}</div>
+    <div style={{
+      position: "fixed", top: 100, right: 14, width: 230, maxHeight: "58vh", overflowY: "auto",
+      background: "rgba(18,18,38,0.7)", backdropFilter: "blur(12px)", border: `1px solid ${PANEL_BORDER}`,
+      borderRadius: 14, padding: "12px 14px", zIndex: 22, boxSizing: "border-box",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+        <span className="ip-glow-pulse" style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS.teal, boxShadow: `0 0 8px ${COLORS.teal}` }} />
+        <span className="ip-display" style={{ fontSize: 11, letterSpacing: 1, textTransform: "uppercase", color: CREAM_MUTED }}>Live in this game</span>
+      </div>
+      {events.length === 0 && <p style={{ fontSize: 12, color: CREAM_FAINT, margin: 0 }}>Waiting for the first move…</p>}
+      {events.map((e, i) => (
+        <div key={e.at + "-" + i} className="ip-fade-in" style={{
+          fontSize: 12, color: COLORS.cream, padding: "7px 0", lineHeight: 1.4,
+          borderBottom: i < events.length - 1 ? "1px solid rgba(247,244,239,0.08)" : "none",
+        }}>
+          <strong>{e.name}</strong>{e.team ? <span style={{ color: COLORS.teal }}> ({e.team})</span> : null} <span style={{ color: CREAM_MUTED }}>{e.text}</span>
+        </div>
+      ))}
+    </div>
   );
 }
-async function pushActivity(code, name, text) {
+async function pushActivity(code, name, text, team) {
   try {
     const key = "activity-" + code;
     const current = (await loadJSON(key, [])) || [];
-    const updated = [...current, { name, text, at: Date.now() }].slice(-30);
+    const updated = [...current, { name, team: team || "", text, at: Date.now() }].slice(-30);
     await saveJSON(key, updated);
   } catch (e) {}
 }
 
-function GameBoard({ game, playerName, onExit }) {
+function GameBoard({ game, playerName, team, onExit }) {
   const [cards] = useState(() => buildBoard(game.pairs, game.cardCount));
   const [flipped, setFlipped] = useState([]);
   const [matched, setMatched] = useState({});
@@ -629,6 +680,7 @@ function GameBoard({ game, playerName, onExit }) {
   const [streak, setStreak] = useState(0);
   const [doubleActive, setDoubleActive] = useState(false);
   const [showBonusBanner, setShowBonusBanner] = useState(false);
+  const [show20Warning, setShow20Warning] = useState(false);
   const [celebration, setCelebration] = useState(null);
   const [goldFlash, setGoldFlash] = useState(null);
   const [showInstructions, setShowInstructions] = useState(false);
@@ -636,7 +688,8 @@ function GameBoard({ game, playerName, onExit }) {
   const timerRef = useRef(null);
   const startedRef = useRef(false);
   const lastBonusSecondRef = useRef(0);
-  const audio = useGameAudio();
+  const warned20Ref = useRef(false);
+  const audio = useGameAudio(game.music);
 
   const timerSeconds = game.timerSeconds || 0;
   const totalPairs = cards.length / 2;
@@ -660,6 +713,16 @@ function GameBoard({ game, playerName, onExit }) {
   }, [seconds]);
 
   useEffect(() => {
+    if (timerSeconds > 0 && remaining === 20 && !warned20Ref.current && !finished) {
+      warned20Ref.current = true;
+      setShow20Warning(true);
+      audio.playWarning();
+      setTimeout(() => setShow20Warning(false), 3000);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remaining]);
+
+  useEffect(() => {
     if (matchedCount === totalPairs && totalPairs > 0 && !finished && !startedRef.current) {
       startedRef.current = true;
       clearInterval(timerRef.current);
@@ -681,7 +744,7 @@ function GameBoard({ game, playerName, onExit }) {
 
   async function finishGame(outOfTime) {
     setFinished(true);
-    const entry = { name: playerName, moves, seconds, score, at: Date.now() };
+    const entry = { name: playerName, team: team || "", moves, seconds, score, at: Date.now() };
     const key = "leaderboard-" + game.code;
     const current = (await loadJSON(key, [])) || [];
     const updated = [...current, entry].sort((a, b) => (b.score - a.score) || (a.seconds - b.seconds) || (a.moves - b.moves)).slice(0, 50);
@@ -691,9 +754,9 @@ function GameBoard({ game, playerName, onExit }) {
     if (top && top.at === entry.at && top.name === entry.name && top.score === entry.score) {
       setIsTopScore(true);
       audio.playHighScore();
-      pushActivity(game.code, playerName, `just set a new high score — ${score} pts!`);
+      pushActivity(game.code, playerName, `just set a new high score — ${score} pts!`, team);
     } else {
-      pushActivity(game.code, playerName, outOfTime ? `ran out of time with ${score} pts` : `finished with ${score} pts`);
+      pushActivity(game.code, playerName, outOfTime ? `ran out of time with ${score} pts` : `finished with ${score} pts`, team);
     }
   }
 
@@ -721,7 +784,7 @@ function GameBoard({ game, playerName, onExit }) {
           setStreak((st) => { const nx = st + 1; if (nx >= 2) audio.playStreak(); return nx; });
           if (earnDouble) { setDoubleActive(false); audio.playDoubleMatch(); setGoldFlash(c1.uid + "-flash-" + Date.now()); }
           else audio.playMatch();
-          pushActivity(game.code, playerName, `matched ${c1.label} & ${c2.label}${earnDouble ? " for a double!" : ""}`);
+          pushActivity(game.code, playerName, `matched ${c1.label} & ${c2.label}${earnDouble ? " for a double!" : ""}`, team);
           setToast(`${earnDouble ? "⚡ DOUBLE! " : "✓ "}${c1.label} + ${c2.label}  +${points}${streak + 1 >= 2 ? `  ·  🔥${streak + 1} streak` : ""}`);
           setTimeout(() => setToast(null), 1500);
           setTimeout(() => { setMatched((m) => ({ ...m, [c1.uid]: true, [c2.uid]: true })); setFlipped([]); setLocked(false); }, 480);
@@ -759,7 +822,7 @@ function GameBoard({ game, playerName, onExit }) {
           <div style={{ maxHeight: 220, overflowY: "auto", marginBottom: 20 }}>
             {(leaderboard || []).map((e, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 4, background: e.name === playerName && e.score === score && e.seconds === seconds ? "rgba(242,169,59,0.18)" : "transparent", fontSize: 14 }}>
-                <span style={{ color: COLORS.cream, fontWeight: 500 }}>{i === 0 ? "👑 " : `${i + 1}. `}{e.name}</span>
+                <span style={{ color: COLORS.cream, fontWeight: 500 }}>{i === 0 ? "👑 " : `${i + 1}. `}{e.name}{e.team ? <span style={{ color: COLORS.teal }}> ({e.team})</span> : null}</span>
                 <span style={{ color: CREAM_MUTED }}>{e.score} pts · {fmtTime(e.seconds)}</span>
               </div>
             ))}
@@ -773,13 +836,13 @@ function GameBoard({ game, playerName, onExit }) {
   return (
     <div style={{ width: "100%", maxWidth: 980, display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
       <GoldFlash triggerKey={goldFlash} />
-      <LiveTicker code={game.code} />
+      <LiveSidebar code={game.code} />
       <InstructionsButton onClick={() => setShowInstructions(true)} />
       {showInstructions && <InstructionsOverlay game={game} onClose={() => setShowInstructions(false)} />}
       <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 12, marginTop: 22 }}>
         <div>
           <p className="ip-display" style={{ color: COLORS.cream, fontSize: 12, opacity: 0.65, margin: 0 }}>{game.name}</p>
-          <p style={{ color: COLORS.cream, fontSize: 14, margin: "2px 0 0", opacity: 0.85 }}>Playing as {playerName}</p>
+          <p style={{ color: COLORS.cream, fontSize: 14, margin: "2px 0 0", opacity: 0.85 }}>Playing as {playerName}{team ? ` · ${team}` : ""}</p>
         </div>
         <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
           <MiniStat label="Score" value={score} highlight />
@@ -796,7 +859,12 @@ function GameBoard({ game, playerName, onExit }) {
           ⚡ Double points! Your next match is worth {BONUS_POINTS}
         </div>
       )}
-      {toast && !showBonusBanner && (
+      {show20Warning && !showBonusBanner && (
+        <div className="ip-banner-in" style={{ position: "absolute", top: -6, left: "50%", zIndex: 26, background: `linear-gradient(135deg, ${COLORS.coral}, #c0392b)`, color: COLORS.cream, padding: "12px 26px", borderRadius: 14, fontWeight: 700, fontSize: 15, textAlign: "center", boxShadow: "0 16px 40px rgba(255,107,91,0.5)", whiteSpace: "nowrap" }}>
+          ⏰ Only 20 seconds left!
+        </div>
+      )}
+      {toast && !showBonusBanner && !show20Warning && (
         <div className="ip-toast-in" style={{ position: "absolute", top: 60, left: "50%", zIndex: 25, background: COLORS.navy, color: COLORS.gold, padding: "8px 18px", borderRadius: 999, fontSize: 13, fontWeight: 600, boxShadow: "0 10px 26px rgba(0,0,0,0.35)", whiteSpace: "nowrap" }}>{toast}</div>
       )}
       <Confetti burstKey={burst} colors={burstColors} originTop={70} />
@@ -857,7 +925,7 @@ function MiniStat({ label, value, highlight, warn }) {
 
 const ADMIN_TABS = [
   { id: "create", label: "Create link" }, { id: "links", label: "Your links" },
-  { id: "pairs", label: "Pairs library" }, { id: "background", label: "Background" },
+  { id: "pairs", label: "Pairs library" }, { id: "background", label: "Background" }, { id: "music", label: "Music" },
   { id: "count", label: "Card count" }, { id: "countdown", label: "Countdown" }, { id: "timer", label: "Game timer" },
 ];
 
@@ -868,6 +936,7 @@ function AdminPanel({ onExit }) {
   const [cardCount, setCardCount] = useState(20);
   const [countdownSeconds, setCountdownSeconds] = useState(DEFAULT_COUNTDOWN_SECONDS);
   const [timerSeconds, setTimerSeconds] = useState(DEFAULT_TIMER_SECONDS);
+  const [music, setMusic] = useState({ type: "builtin", url: "" });
   const [games, setGames] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -878,8 +947,9 @@ function AdminPanel({ onExit }) {
       const cc = await loadJSON("card-count-setting", 20);
       const cd = await loadJSON("countdown-seconds", DEFAULT_COUNTDOWN_SECONDS);
       const gt = await loadJSON("game-timer-seconds", DEFAULT_TIMER_SECONDS);
+      const mu = await loadJSON("music-settings", { type: "builtin", url: "" });
       const idx = await loadJSON("games-index", []);
-      setCategories(cats); setBackground(bg); setCardCount(cc); setCountdownSeconds(cd); setTimerSeconds(gt); setGames(idx); setLoading(false);
+      setCategories(cats); setBackground(bg); setCardCount(cc); setCountdownSeconds(cd); setTimerSeconds(gt); setMusic(mu); setGames(idx); setLoading(false);
     })();
   }, []);
 
@@ -902,10 +972,11 @@ function AdminPanel({ onExit }) {
         ))}
       </div>
       <Panel maxWidth={800}>
-        {tab === "create" && <CreateLinkTab categories={categories} background={background} cardCount={cardCount} countdownSeconds={countdownSeconds} timerSeconds={timerSeconds} games={games} setGames={setGames} />}
+        {tab === "create" && <CreateLinkTab categories={categories} background={background} cardCount={cardCount} countdownSeconds={countdownSeconds} timerSeconds={timerSeconds} music={music} games={games} setGames={setGames} />}
         {tab === "links" && <LinksTab games={games} />}
         {tab === "pairs" && <CategoriesTab categories={categories} setCategories={setCategories} />}
         {tab === "background" && <BackgroundTab background={background} setBackground={setBackground} />}
+        {tab === "music" && <MusicTab music={music} setMusic={setMusic} />}
         {tab === "count" && <CardCountTab cardCount={cardCount} setCardCount={setCardCount} maxPairs={totalPairs} />}
         {tab === "countdown" && <CountdownTab countdownSeconds={countdownSeconds} setCountdownSeconds={setCountdownSeconds} />}
         {tab === "timer" && <GameTimerTab timerSeconds={timerSeconds} setTimerSeconds={setTimerSeconds} />}
@@ -914,7 +985,7 @@ function AdminPanel({ onExit }) {
   );
 }
 
-function CreateLinkTab({ categories, background, cardCount, countdownSeconds, timerSeconds, games, setGames }) {
+function CreateLinkTab({ categories, background, cardCount, countdownSeconds, timerSeconds, music, games, setGames }) {
   const [name, setName] = useState("");
   const [selectedCats, setSelectedCats] = useState(() => Object.fromEntries(CATEGORY_NAMES.map((c) => [c, true])));
   const [created, setCreated] = useState(null); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
@@ -929,7 +1000,7 @@ function CreateLinkTab({ categories, background, cardCount, countdownSeconds, ti
     if (pool.length < 2) { setError("Select at least one category with pairs."); return; }
     setError(""); setSaving(true);
     const code = uid(5);
-    const game = { code, name: name.trim(), background, cardCount, countdownSeconds, timerSeconds, pairs: pool, createdAt: Date.now() };
+    const game = { code, name: name.trim(), background, cardCount, countdownSeconds, timerSeconds, music, pairs: pool, createdAt: Date.now() };
     await saveJSON("game-" + code, game);
     const idxEntry = { code, name: game.name, createdAt: game.createdAt, cardCount };
     const newIndex = [idxEntry, ...(games || [])];
@@ -1000,7 +1071,7 @@ function LinksTab({ games }) {
               <div style={{ marginTop: 10, background: "rgba(247,244,239,0.05)", borderRadius: 10, padding: 12 }}>
                 {board && board.length > 0 ? board.slice(0, 10).map((e, i) => (
                   <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0", color: COLORS.cream }}>
-                    <span>{i + 1}. {e.name}</span><span style={{ color: CREAM_MUTED }}>{e.score ?? "—"} pts · {fmtTime(e.seconds)}</span>
+                    <span>{i + 1}. {e.name}{e.team ? ` (${e.team})` : ""}</span><span style={{ color: CREAM_MUTED }}>{e.score ?? "—"} pts · {fmtTime(e.seconds)}</span>
                   </div>
                 )) : <p style={{ fontSize: 12, color: CREAM_MUTED, margin: 0 }}>No completed plays yet.</p>}
               </div>
@@ -1058,6 +1129,42 @@ function CategoriesTab({ categories, setCategories }) {
         ))}
       </div>
       <GhostButton onClick={resetCat} style={{ marginTop: 14 }}>Reset "{activeCat}" to default 10 pairs</GhostButton>
+    </div>
+  );
+}
+
+function MusicTab({ music, setMusic }) {
+  const [url, setUrl] = useState(music.url || "");
+  const [saving, setSaving] = useState(false);
+  const choose = async (type, u) => {
+    setSaving(true);
+    const next = { type, url: type === "custom" ? (u ?? url) : "" };
+    setMusic(next);
+    await saveJSON("music-settings", next);
+    setSaving(false);
+  };
+  return (
+    <div>
+      <p style={{ fontSize: 12, color: CREAM_MUTED, margin: "0 0 4px" }}>Choose the background music for the next links you create.</p>
+      <p style={{ fontSize: 12, color: CREAM_FAINT, margin: "0 0 16px" }}>The built-in soundtrack is generated in-browser and always stays available — switch back to it anytime.</p>
+      <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
+        <button className="ip-btn" onClick={() => choose("builtin")} disabled={saving} style={{
+          background: music.type !== "custom" ? COLORS.gold : "rgba(247,244,239,0.1)", color: music.type !== "custom" ? COLORS.navy : COLORS.cream,
+          border: "none", borderRadius: 10, padding: "10px 18px", fontSize: 13,
+        }}>🎵 Built-in soundtrack</button>
+        <button className="ip-btn" onClick={() => choose("custom", url)} disabled={saving || !url.trim()} style={{
+          background: music.type === "custom" ? COLORS.gold : "rgba(247,244,239,0.1)", color: music.type === "custom" ? COLORS.navy : COLORS.cream,
+          border: "none", borderRadius: 10, padding: "10px 18px", fontSize: 13,
+        }}>🔗 Custom track URL</button>
+      </div>
+      <p style={{ fontSize: 12, fontWeight: 600, color: COLORS.cream, margin: "0 0 8px" }}>Custom track URL</p>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input className="ip-input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/track.mp3"
+          style={{ flex: 1, ...inputStyle(false), padding: "10px 12px", fontSize: 13 }} />
+        <PrimaryButton onClick={() => choose("custom", url)} disabled={saving || !url.trim()}>Use this track</PrimaryButton>
+      </div>
+      <p style={{ fontSize: 11, color: CREAM_FAINT, margin: "10px 0 0" }}>Needs to be a direct link to an audio file (.mp3, .m4a, etc.) that allows playback from other sites — not a page like a YouTube or Spotify link.</p>
+      {music.type === "custom" && music.url && <p style={{ fontSize: 12, color: COLORS.teal, margin: "10px 0 0" }}>Currently active: {music.url}</p>}
     </div>
   );
 }
@@ -1150,6 +1257,7 @@ export default function App() {
   const [view, setView] = useState("loading");
   const [activeGame, setActiveGame] = useState(null);
   const [playerName, setPlayerName] = useState("");
+  const [playerTeam, setPlayerTeam] = useState("");
   const [showInstructionsOverlay, setShowInstructionsOverlay] = useState(false);
 
   useEffect(() => {
@@ -1188,7 +1296,7 @@ export default function App() {
       </Shell>
     );
   }
-  if (view === "player-login") return <Shell background={bg}><PlayerLogin game={activeGame} onPlay={(n) => { setPlayerName(n); setView("instructions"); }} onBack={goJoin} /></Shell>;
+  if (view === "player-login") return <Shell background={bg}><PlayerLogin game={activeGame} onPlay={(n, t) => { setPlayerName(n); setPlayerTeam(t); setView("instructions"); }} onBack={goJoin} /></Shell>;
   if (view === "instructions") return <Shell background={bg}><InstructionsScreen game={activeGame} onStart={() => setView("countdown")} /></Shell>;
   if (view === "countdown") {
     return (
@@ -1198,6 +1306,6 @@ export default function App() {
       </Shell>
     );
   }
-  if (view === "game") return <Shell background={bg}><GameBoard game={activeGame} playerName={playerName} onExit={goJoin} /></Shell>;
+  if (view === "game") return <Shell background={bg}><GameBoard game={activeGame} playerName={playerName} team={playerTeam} onExit={goJoin} /></Shell>;
   return null;
 }
