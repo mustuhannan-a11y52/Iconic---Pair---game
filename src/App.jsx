@@ -223,7 +223,7 @@ function useGameAudio(musicConfig) {
       synthRef.current = synth;
 
       if (musicConfig && musicConfig.type === "custom" && musicConfig.url) {
-        // Custom background track supplied by the admin
+        // Custom background track supplied by the admin (pasted URL or uploaded file)
         try {
           const el = new Audio(musicConfig.url);
           el.loop = true;
@@ -231,6 +231,8 @@ function useGameAudio(musicConfig) {
           el.play().catch(() => {});
           audioElRef.current = el;
         } catch (e) {}
+      } else if (musicConfig && musicConfig.type === "youtube" && musicConfig.videoId) {
+        // Handled separately by useYouTubeBackgroundMusic — nothing to do here.
       } else {
         // Built-in generated soundtrack (always available as the default)
         Tone.Transport.bpm.value = 118;
@@ -282,6 +284,70 @@ function useGameAudio(musicConfig) {
     if (audioElRef.current) audioElRef.current.muted = next;
   };
   return { boot, stop, playMatch, playBonus, playDoubleMatch, playWin, playStreak, playHighScore, playWarning, muted, toggleMute };
+}
+
+function extractYouTubeId(url) {
+  if (!url) return null;
+  const patterns = [
+    /(?:youtube\.com\/watch\?v=)([\w-]{11})/,
+    /(?:youtu\.be\/)([\w-]{11})/,
+    /(?:youtube\.com\/embed\/)([\w-]{11})/,
+    /(?:youtube\.com\/shorts\/)([\w-]{11})/,
+  ];
+  for (const p of patterns) { const m = url.match(p); if (m) return m[1]; }
+  return null;
+}
+
+function useYouTubeBackgroundMusic(music, muted) {
+  const playerRef = useRef(null);
+  const containerIdRef = useRef("yt-bg-" + Math.random().toString(36).slice(2));
+  const active = !!(music && music.type === "youtube" && music.videoId);
+
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    function createPlayer() {
+      if (cancelled) return;
+      try {
+        playerRef.current = new window.YT.Player(containerIdRef.current, {
+          height: "0", width: "0", videoId: music.videoId,
+          playerVars: { autoplay: 1, loop: 1, playlist: music.videoId, controls: 0, disablekb: 1, fs: 0, modestbranding: 1 },
+          events: {
+            onReady: (e) => {
+              e.target.setVolume(45);
+              if (muted) e.target.mute(); else e.target.unMute();
+              e.target.playVideo();
+            },
+          },
+        });
+      } catch (err) {}
+    }
+    if (window.YT && window.YT.Player) {
+      createPlayer();
+    } else {
+      const prevCb = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { prevCb && prevCb(); createPlayer(); };
+      if (!document.getElementById("youtube-iframe-api-script")) {
+        const tag = document.createElement("script");
+        tag.id = "youtube-iframe-api-script";
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(tag);
+      }
+    }
+    return () => {
+      cancelled = true;
+      try { playerRef.current?.destroy(); } catch (e) {}
+      playerRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, music?.videoId]);
+
+  useEffect(() => {
+    if (!active || !playerRef.current || typeof playerRef.current.mute !== "function") return;
+    try { if (muted) playerRef.current.mute(); else playerRef.current.unMute(); } catch (e) {}
+  }, [muted, active]);
+
+  return { containerId: containerIdRef.current, active };
 }
 
 /* ---------------------------------------------------------
@@ -690,6 +756,7 @@ function GameBoard({ game, playerName, team, onExit }) {
   const lastBonusSecondRef = useRef(0);
   const warned20Ref = useRef(false);
   const audio = useGameAudio(game.music);
+  const ytMusic = useYouTubeBackgroundMusic(game.music, audio.muted);
 
   const timerSeconds = game.timerSeconds || 0;
   const totalPairs = cards.length / 2;
@@ -836,6 +903,7 @@ function GameBoard({ game, playerName, team, onExit }) {
   return (
     <div style={{ width: "100%", maxWidth: 980, display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
       <GoldFlash triggerKey={goldFlash} />
+      {ytMusic.active && <div id={ytMusic.containerId} style={{ position: "fixed", width: 0, height: 0, overflow: "hidden", opacity: 0, pointerEvents: "none" }} />}
       <LiveSidebar code={game.code} />
       <InstructionsButton onClick={() => setShowInstructions(true)} />
       {showInstructions && <InstructionsOverlay game={game} onClose={() => setShowInstructions(false)} />}
@@ -1134,37 +1202,92 @@ function CategoriesTab({ categories, setCategories }) {
 }
 
 function MusicTab({ music, setMusic }) {
-  const [url, setUrl] = useState(music.url || "");
+  const [url, setUrl] = useState(music.type === "custom" ? music.url || "" : "");
+  const [ytUrl, setYtUrl] = useState(music.type === "youtube" ? `https://youtu.be/${music.videoId || ""}` : "");
+  const [ytError, setYtError] = useState("");
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
   const [saving, setSaving] = useState(false);
-  const choose = async (type, u) => {
-    setSaving(true);
-    const next = { type, url: type === "custom" ? (u ?? url) : "" };
-    setMusic(next);
-    await saveJSON("music-settings", next);
+
+  const saveMusic = async (next) => { setMusic(next); await saveJSON("music-settings", next); };
+
+  const useBuiltin = async () => { setSaving(true); await saveMusic({ type: "builtin", url: "" }); setSaving(false); };
+
+  const useYouTube = async () => {
+    const id = extractYouTubeId(ytUrl.trim());
+    if (!id) { setYtError("Couldn't find a video ID in that link — paste a normal youtube.com or youtu.be link."); return; }
+    setYtError(""); setSaving(true);
+    await saveMusic({ type: "youtube", videoId: id });
     setSaving(false);
   };
+
+  const useUrl = async () => {
+    if (!url.trim()) return;
+    setSaving(true);
+    await saveMusic({ type: "custom", url: url.trim() });
+    setSaving(false);
+  };
+
+  const handleUpload = async () => {
+    if (!file) return;
+    setUploading(true); setUploadError("");
+    try {
+      const safeName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
+      const { error: upErr } = await supabase.storage.from("music").upload(safeName, file, { upsert: true, contentType: file.type || "audio/mpeg" });
+      if (upErr) throw upErr;
+      const { data } = supabase.storage.from("music").getPublicUrl(safeName);
+      setUrl(data.publicUrl);
+      await saveMusic({ type: "custom", url: data.publicUrl });
+    } catch (e) {
+      setUploadError("Upload failed. Make sure the \"music\" storage bucket is set up — run supabase-music-setup.sql once in Supabase's SQL Editor.");
+    }
+    setUploading(false);
+  };
+
+  const activeLabel = music.type === "youtube" ? "YouTube" : music.type === "custom" ? "Custom track" : "Built-in";
+
   return (
     <div>
       <p style={{ fontSize: 12, color: CREAM_MUTED, margin: "0 0 4px" }}>Choose the background music for the next links you create.</p>
-      <p style={{ fontSize: 12, color: CREAM_FAINT, margin: "0 0 16px" }}>The built-in soundtrack is generated in-browser and always stays available — switch back to it anytime.</p>
-      <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
-        <button className="ip-btn" onClick={() => choose("builtin")} disabled={saving} style={{
-          background: music.type !== "custom" ? COLORS.gold : "rgba(247,244,239,0.1)", color: music.type !== "custom" ? COLORS.navy : COLORS.cream,
-          border: "none", borderRadius: 10, padding: "10px 18px", fontSize: 13,
-        }}>🎵 Built-in soundtrack</button>
-        <button className="ip-btn" onClick={() => choose("custom", url)} disabled={saving || !url.trim()} style={{
-          background: music.type === "custom" ? COLORS.gold : "rgba(247,244,239,0.1)", color: music.type === "custom" ? COLORS.navy : COLORS.cream,
-          border: "none", borderRadius: 10, padding: "10px 18px", fontSize: 13,
-        }}>🔗 Custom track URL</button>
+      <p style={{ fontSize: 12, color: COLORS.teal, margin: "0 0 20px" }}>Currently active: {activeLabel}</p>
+
+      <div style={{ marginBottom: 22, padding: 14, background: "rgba(247,244,239,0.04)", borderRadius: 12 }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: COLORS.cream, margin: "0 0 4px" }}>🎵 Built-in soundtrack</p>
+        <p style={{ fontSize: 12, color: CREAM_FAINT, margin: "0 0 10px" }}>Generated in-browser, no setup needed, always available.</p>
+        <PrimaryButton onClick={useBuiltin} disabled={saving}>Use built-in soundtrack</PrimaryButton>
       </div>
-      <p style={{ fontSize: 12, fontWeight: 600, color: COLORS.cream, margin: "0 0 8px" }}>Custom track URL</p>
-      <div style={{ display: "flex", gap: 8 }}>
-        <input className="ip-input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/track.mp3"
-          style={{ flex: 1, ...inputStyle(false), padding: "10px 12px", fontSize: 13 }} />
-        <PrimaryButton onClick={() => choose("custom", url)} disabled={saving || !url.trim()}>Use this track</PrimaryButton>
+
+      <div style={{ marginBottom: 22, padding: 14, background: "rgba(247,244,239,0.04)", borderRadius: 12 }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: COLORS.cream, margin: "0 0 4px" }}>📺 YouTube link</p>
+        <p style={{ fontSize: 12, color: CREAM_FAINT, margin: "0 0 10px" }}>Paste any normal YouTube link — it plays hidden in the background, looping.</p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input className="ip-input" value={ytUrl} onChange={(e) => { setYtUrl(e.target.value); setYtError(""); }} placeholder="https://youtu.be/…"
+            style={{ flex: 1, ...inputStyle(!!ytError), padding: "10px 12px", fontSize: 13 }} />
+          <PrimaryButton onClick={useYouTube} disabled={saving || !ytUrl.trim()}>Use this video</PrimaryButton>
+        </div>
+        {ytError && <p style={{ color: COLORS.coral, fontSize: 12, margin: "8px 0 0" }}>{ytError}</p>}
       </div>
-      <p style={{ fontSize: 11, color: CREAM_FAINT, margin: "10px 0 0" }}>Needs to be a direct link to an audio file (.mp3, .m4a, etc.) that allows playback from other sites — not a page like a YouTube or Spotify link.</p>
-      {music.type === "custom" && music.url && <p style={{ fontSize: 12, color: COLORS.teal, margin: "10px 0 0" }}>Currently active: {music.url}</p>}
+
+      <div style={{ marginBottom: 22, padding: 14, background: "rgba(247,244,239,0.04)", borderRadius: 12 }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: COLORS.cream, margin: "0 0 4px" }}>⬆️ Upload an MP3</p>
+        <p style={{ fontSize: 12, color: CREAM_FAINT, margin: "0 0 10px" }}>Uploads to your project's storage and uses it directly — no external link needed. Requires the one-time "music" storage bucket setup (see supabase-music-setup.sql).</p>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <input type="file" accept="audio/*" onChange={(e) => setFile(e.target.files?.[0] || null)}
+            style={{ color: COLORS.cream, fontSize: 12, flex: 1, minWidth: 180 }} />
+          <PrimaryButton onClick={handleUpload} disabled={uploading || !file}>{uploading ? "Uploading…" : "Upload & use"}</PrimaryButton>
+        </div>
+        {uploadError && <p style={{ color: COLORS.coral, fontSize: 12, margin: "8px 0 0" }}>{uploadError}</p>}
+      </div>
+
+      <details>
+        <summary style={{ fontSize: 12, color: CREAM_FAINT, cursor: "pointer" }}>Advanced: paste a direct audio URL instead</summary>
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <input className="ip-input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/track.mp3"
+            style={{ flex: 1, ...inputStyle(false), padding: "10px 12px", fontSize: 13 }} />
+          <PrimaryButton onClick={useUrl} disabled={saving || !url.trim()}>Use this URL</PrimaryButton>
+        </div>
+      </details>
     </div>
   );
 }
