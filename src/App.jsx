@@ -28,6 +28,8 @@ const BONUS_POINTS = 1000;
 const BONUS_INTERVAL_SECONDS = 6;
 const DEFAULT_COUNTDOWN_SECONDS = 10;
 const DEFAULT_TIMER_SECONDS = 0; // 0 = unlimited
+const MOVES_BONUS_POINTS = 1000;
+const DEFAULT_MOVES_BONUS_THRESHOLD = 15;
 
 const BACKGROUND_PRESETS = [
   { id: "midnight", name: "Midnight indigo", css: `linear-gradient(135deg, #14142B 0%, #1E1E42 100%)` },
@@ -298,10 +300,11 @@ function extractYouTubeId(url) {
   return null;
 }
 
-function useYouTubeBackgroundMusic(music, muted) {
+function useYouTubeBackgroundMusic(music) {
   const playerRef = useRef(null);
   const containerIdRef = useRef("yt-bg-" + Math.random().toString(36).slice(2));
   const active = !!(music && music.type === "youtube" && music.videoId);
+  const [ytMuted, setYtMuted] = useState(true);
 
   useEffect(() => {
     if (!active) return;
@@ -314,9 +317,13 @@ function useYouTubeBackgroundMusic(music, muted) {
           playerVars: { autoplay: 1, loop: 1, playlist: music.videoId, controls: 0, disablekb: 1, fs: 0, modestbranding: 1 },
           events: {
             onReady: (e) => {
+              // Always start muted — this is the one combination every
+              // browser reliably allows to autoplay inside an iframe.
+              // Real unmuting happens later, directly inside a click handler.
               e.target.setVolume(45);
-              if (muted) e.target.mute(); else e.target.unMute();
+              e.target.mute();
               e.target.playVideo();
+              setYtMuted(true);
             },
           },
         });
@@ -342,12 +349,19 @@ function useYouTubeBackgroundMusic(music, muted) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, music?.videoId]);
 
-  useEffect(() => {
-    if (!active || !playerRef.current || typeof playerRef.current.mute !== "function") return;
-    try { if (muted) playerRef.current.mute(); else playerRef.current.unMute(); } catch (e) {}
-  }, [muted, active]);
+  // Call this directly from a click handler — never from a useEffect —
+  // so the browser sees it as a genuine user gesture and actually allows
+  // unmuted playback.
+  const toggleMute = () => {
+    if (!playerRef.current || typeof playerRef.current.isMuted !== "function") return;
+    try {
+      const currentlyMuted = playerRef.current.isMuted();
+      if (currentlyMuted) { playerRef.current.unMute(); playerRef.current.playVideo(); setYtMuted(false); }
+      else { playerRef.current.mute(); setYtMuted(true); }
+    } catch (e) {}
+  };
 
-  return { containerId: containerIdRef.current, active };
+  return { containerId: containerIdRef.current, active, toggleMute, ytMuted };
 }
 
 /* ---------------------------------------------------------
@@ -497,10 +511,12 @@ function GhostButton({ children, onClick, style }) {
 function InstructionsContent({ game }) {
   const countdownSeconds = game.countdownSeconds ?? DEFAULT_COUNTDOWN_SECONDS;
   const timerSeconds = game.timerSeconds ?? 0;
+  const movesBonusThreshold = game.movesBonusThreshold ?? DEFAULT_MOVES_BONUS_THRESHOLD;
   const rows = [
     { icon: "🃏", text: `Tap two cards to flip them. Find each card's iconic other half — like Salt & Pepper, or Batman & Robin.` },
     { icon: "✨", text: `Every correct pair is worth ${MATCH_POINTS} points.` },
     { icon: "⚡", text: `Watch for the gold "Double Points" banner — it pops up regularly. Whatever pair you find while it's active scores ${BONUS_POINTS} instead.` },
+    { icon: "🎯", text: `Finish the whole board in ${movesBonusThreshold} moves or fewer for a flat +${MOVES_BONUS_POINTS} bonus at the end.` },
     { icon: "⏱️", text: `The board unlocks after a ${countdownSeconds}-second countdown — cards will shuffle on screen while you wait.` },
   ];
   if (timerSeconds > 0) rows.push({ icon: "⏳", text: `You have ${fmtTime(timerSeconds)} to find as many pairs as you can before time's up.` });
@@ -739,6 +755,8 @@ function GameBoard({ game, playerName, team, onExit }) {
   const [finished, setFinished] = useState(false);
   const [leaderboard, setLeaderboard] = useState(null);
   const [isTopScore, setIsTopScore] = useState(false);
+  const [movesBonusAwarded, setMovesBonusAwarded] = useState(false);
+  const [layoutMode, setLayoutMode] = useState(() => (typeof window !== "undefined" && window.innerWidth < 700 ? "mobile" : "laptop"));
   const [burst, setBurst] = useState(null);
   const [burstColors, setBurstColors] = useState([COLORS.gold]);
   const [toast, setToast] = useState(null);
@@ -756,7 +774,8 @@ function GameBoard({ game, playerName, team, onExit }) {
   const lastBonusSecondRef = useRef(0);
   const warned20Ref = useRef(false);
   const audio = useGameAudio(game.music);
-  const ytMusic = useYouTubeBackgroundMusic(game.music, audio.muted);
+  const ytMusic = useYouTubeBackgroundMusic(game.music);
+  const [showYtHint, setShowYtHint] = useState(ytMusic.active);
 
   const timerSeconds = game.timerSeconds || 0;
   const totalPairs = cards.length / 2;
@@ -810,20 +829,25 @@ function GameBoard({ game, playerName, team, onExit }) {
   }, [remaining]);
 
   async function finishGame(outOfTime) {
+    const movesBonusEligible = !outOfTime && moves <= (game.movesBonusThreshold || DEFAULT_MOVES_BONUS_THRESHOLD);
+    const finalScore = score + (movesBonusEligible ? MOVES_BONUS_POINTS : 0);
+    if (movesBonusEligible) { setScore(finalScore); setMovesBonusAwarded(true); audio.playHighScore(); }
     setFinished(true);
-    const entry = { name: playerName, team: team || "", moves, seconds, score, at: Date.now() };
+    const entry = { name: playerName, team: team || "", moves, seconds, score: finalScore, at: Date.now() };
     const key = "leaderboard-" + game.code;
     const current = (await loadJSON(key, [])) || [];
-    const updated = [...current, entry].sort((a, b) => (b.score - a.score) || (a.seconds - b.seconds) || (a.moves - b.moves)).slice(0, 50);
+    const updated = [...current, entry].sort((a, b) => (a.seconds - b.seconds) || (b.score - a.score) || (a.moves - b.moves)).slice(0, 50);
     await saveJSON(key, updated);
     setLeaderboard(updated);
     const top = updated[0];
     if (top && top.at === entry.at && top.name === entry.name && top.score === entry.score) {
       setIsTopScore(true);
       audio.playHighScore();
-      pushActivity(game.code, playerName, `just set a new high score — ${score} pts!`, team);
+      pushActivity(game.code, playerName, `just topped the leaderboard — ${finalScore} pts!`, team);
+    } else if (movesBonusEligible) {
+      pushActivity(game.code, playerName, `finished in just ${moves} moves for a ${MOVES_BONUS_POINTS}pt efficiency bonus!`, team);
     } else {
-      pushActivity(game.code, playerName, outOfTime ? `ran out of time with ${score} pts` : `finished with ${score} pts`, team);
+      pushActivity(game.code, playerName, outOfTime ? `ran out of time with ${finalScore} pts` : `finished with ${finalScore} pts`, team);
     }
   }
 
@@ -863,7 +887,8 @@ function GameBoard({ game, playerName, team, onExit }) {
     }
   };
 
-  const cols = Math.max(4, Math.min(10, Math.ceil(Math.sqrt(cards.length * 1.4))));
+  const autoCols = Math.max(4, Math.min(10, Math.ceil(Math.sqrt(cards.length * 1.4))));
+  const cols = layoutMode === "mobile" ? Math.min(4, autoCols) : autoCols;
   const progressPct = totalPairs ? Math.round((matchedCount / totalPairs) * 100) : 0;
 
   if (finished) {
@@ -875,10 +900,15 @@ function GameBoard({ game, playerName, team, onExit }) {
         <div style={{ width: 64, height: 64, borderRadius: "50%", background: `linear-gradient(145deg, ${COLORS.gold}, ${COLORS.coral})`, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14, boxShadow: "0 12px 30px rgba(242,169,59,0.4)" }}>
           <span style={{ fontSize: 28 }}>{isTopScore ? "👑" : timedOut ? "⏱️" : "🎉"}</span>
         </div>
-        {isTopScore && <p className="ip-display" style={{ color: COLORS.gold, fontSize: 14, letterSpacing: 1, textTransform: "uppercase", margin: "0 0 4px", fontWeight: 800 }}>New high score!</p>}
+        {isTopScore && <p className="ip-display" style={{ color: COLORS.gold, fontSize: 14, letterSpacing: 1, textTransform: "uppercase", margin: "0 0 4px", fontWeight: 800 }}>Top of the leaderboard!</p>}
         <p className="ip-display" style={{ color: COLORS.gold, fontSize: 13, letterSpacing: 1, textTransform: "uppercase", margin: "0 0 8px" }}>{tier}</p>
         <h1 className="ip-display ip-gradient-text" style={{ fontSize: 40, fontWeight: 800, margin: "0 0 6px", textAlign: "center" }}>{score} points</h1>
-        <p style={{ color: CREAM_MUTED, fontSize: 15, margin: "0 0 24px" }}>{timedOut ? `Time ran out, ${playerName.split(" ")[0]} — ` : "Nice work, "}{!timedOut && playerName.split(" ")[0]}{timedOut && `${matchedCount}/${totalPairs} pairs found`}</p>
+        <p style={{ color: CREAM_MUTED, fontSize: 15, margin: "0 0 12px" }}>{timedOut ? `Time ran out, ${playerName.split(" ")[0]} — ` : "Nice work, "}{!timedOut && playerName.split(" ")[0]}{timedOut && `${matchedCount}/${totalPairs} pairs found`}</p>
+        {movesBonusAwarded && (
+          <div className="ip-fade-in" style={{ background: "rgba(46,196,182,0.15)", border: `1px solid ${COLORS.teal}`, borderRadius: 999, padding: "6px 16px", fontSize: 13, color: COLORS.teal, fontWeight: 600, margin: "0 0 20px" }}>
+            🎯 Finished in {moves} moves — +{MOVES_BONUS_POINTS} efficiency bonus!
+          </div>
+        )}
         <Panel maxWidth={420}>
           <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
             <StatBlock label="Time" value={fmtTime(seconds)} />
@@ -916,11 +946,28 @@ function GameBoard({ game, playerName, team, onExit }) {
           <MiniStat label="Score" value={score} highlight />
           <MiniStat label={timerSeconds > 0 ? "Time left" : "Time"} value={timerSeconds > 0 ? fmtTime(remaining) : fmtTime(seconds)} warn={timerSeconds > 0 && remaining <= 20} />
           <MiniStat label="Moves" value={moves} />
-          <button className="ip-btn" onClick={audio.toggleMute} title={audio.muted ? "Unmute" : "Mute"} style={{ background: "rgba(247,244,239,0.08)", border: "1px solid rgba(247,244,239,0.25)", borderRadius: 8, width: 34, height: 34, color: COLORS.cream, fontSize: 15 }}>{audio.muted ? "🔇" : "🔊"}</button>
+          <div style={{ display: "flex", gap: 4, background: "rgba(247,244,239,0.06)", borderRadius: 8, padding: 3 }}>
+            <button className="ip-btn" onClick={() => setLayoutMode("mobile")} title="Mobile layout" style={{
+              background: layoutMode === "mobile" ? COLORS.gold : "transparent", color: layoutMode === "mobile" ? COLORS.navy : COLORS.cream,
+              border: "none", borderRadius: 6, padding: "6px 10px", fontSize: 12,
+            }}>📱</button>
+            <button className="ip-btn" onClick={() => setLayoutMode("laptop")} title="Laptop layout" style={{
+              background: layoutMode === "laptop" ? COLORS.gold : "transparent", color: layoutMode === "laptop" ? COLORS.navy : COLORS.cream,
+              border: "none", borderRadius: 6, padding: "6px 10px", fontSize: 12,
+            }}>💻</button>
+          </div>
+          <button className="ip-btn" onClick={() => { audio.toggleMute(); ytMusic.toggleMute(); setShowYtHint(false); }} title={audio.muted ? "Unmute" : "Mute"} style={{ background: "rgba(247,244,239,0.08)", border: "1px solid rgba(247,244,239,0.25)", borderRadius: 8, width: 34, height: 34, color: COLORS.cream, fontSize: 15 }}>{audio.muted ? "🔇" : "🔊"}</button>
         </div>
       </div>
 
       <div style={{ width: "100%", marginBottom: 18 }}><div className="ip-progress-track"><div className="ip-progress-fill" style={{ width: `${progressPct}%` }} /></div></div>
+
+      {showYtHint && (
+        <div className="ip-fade-in" style={{
+          position: "absolute", top: 44, right: 14, zIndex: 24, background: "rgba(20,20,43,0.85)", border: `1px solid ${PANEL_BORDER}`,
+          color: COLORS.gold, fontSize: 12, padding: "7px 14px", borderRadius: 999, whiteSpace: "nowrap",
+        }}>🔈 Music starts muted — tap the speaker icon to turn it on</div>
+      )}
 
       {showBonusBanner && (
         <div className="ip-banner-in" style={{ position: "absolute", top: -6, left: "50%", zIndex: 26, background: `linear-gradient(135deg, ${COLORS.gold}, ${COLORS.coral})`, color: COLORS.navy, padding: "12px 26px", borderRadius: 14, fontWeight: 700, fontSize: 15, textAlign: "center", boxShadow: "0 16px 40px rgba(242,169,59,0.5)", whiteSpace: "nowrap" }}>
@@ -995,6 +1042,7 @@ const ADMIN_TABS = [
   { id: "create", label: "Create link" }, { id: "links", label: "Your links" },
   { id: "pairs", label: "Pairs library" }, { id: "background", label: "Background" }, { id: "music", label: "Music" },
   { id: "count", label: "Card count" }, { id: "countdown", label: "Countdown" }, { id: "timer", label: "Game timer" },
+  { id: "movesbonus", label: "Moves bonus" },
 ];
 
 function AdminPanel({ onExit }) {
@@ -1004,6 +1052,7 @@ function AdminPanel({ onExit }) {
   const [cardCount, setCardCount] = useState(20);
   const [countdownSeconds, setCountdownSeconds] = useState(DEFAULT_COUNTDOWN_SECONDS);
   const [timerSeconds, setTimerSeconds] = useState(DEFAULT_TIMER_SECONDS);
+  const [movesBonusThreshold, setMovesBonusThreshold] = useState(DEFAULT_MOVES_BONUS_THRESHOLD);
   const [music, setMusic] = useState({ type: "builtin", url: "" });
   const [games, setGames] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1015,9 +1064,10 @@ function AdminPanel({ onExit }) {
       const cc = await loadJSON("card-count-setting", 20);
       const cd = await loadJSON("countdown-seconds", DEFAULT_COUNTDOWN_SECONDS);
       const gt = await loadJSON("game-timer-seconds", DEFAULT_TIMER_SECONDS);
+      const mb = await loadJSON("moves-bonus-threshold", DEFAULT_MOVES_BONUS_THRESHOLD);
       const mu = await loadJSON("music-settings", { type: "builtin", url: "" });
       const idx = await loadJSON("games-index", []);
-      setCategories(cats); setBackground(bg); setCardCount(cc); setCountdownSeconds(cd); setTimerSeconds(gt); setMusic(mu); setGames(idx); setLoading(false);
+      setCategories(cats); setBackground(bg); setCardCount(cc); setCountdownSeconds(cd); setTimerSeconds(gt); setMovesBonusThreshold(mb); setMusic(mu); setGames(idx); setLoading(false);
     })();
   }, []);
 
@@ -1040,7 +1090,7 @@ function AdminPanel({ onExit }) {
         ))}
       </div>
       <Panel maxWidth={800}>
-        {tab === "create" && <CreateLinkTab categories={categories} background={background} cardCount={cardCount} countdownSeconds={countdownSeconds} timerSeconds={timerSeconds} music={music} games={games} setGames={setGames} />}
+        {tab === "create" && <CreateLinkTab categories={categories} background={background} cardCount={cardCount} countdownSeconds={countdownSeconds} timerSeconds={timerSeconds} movesBonusThreshold={movesBonusThreshold} music={music} games={games} setGames={setGames} />}
         {tab === "links" && <LinksTab games={games} />}
         {tab === "pairs" && <CategoriesTab categories={categories} setCategories={setCategories} />}
         {tab === "background" && <BackgroundTab background={background} setBackground={setBackground} />}
@@ -1048,12 +1098,13 @@ function AdminPanel({ onExit }) {
         {tab === "count" && <CardCountTab cardCount={cardCount} setCardCount={setCardCount} maxPairs={totalPairs} />}
         {tab === "countdown" && <CountdownTab countdownSeconds={countdownSeconds} setCountdownSeconds={setCountdownSeconds} />}
         {tab === "timer" && <GameTimerTab timerSeconds={timerSeconds} setTimerSeconds={setTimerSeconds} />}
+        {tab === "movesbonus" && <MovesBonusTab movesBonusThreshold={movesBonusThreshold} setMovesBonusThreshold={setMovesBonusThreshold} />}
       </Panel>
     </div>
   );
 }
 
-function CreateLinkTab({ categories, background, cardCount, countdownSeconds, timerSeconds, music, games, setGames }) {
+function CreateLinkTab({ categories, background, cardCount, countdownSeconds, timerSeconds, movesBonusThreshold, music, games, setGames }) {
   const [name, setName] = useState("");
   const [selectedCats, setSelectedCats] = useState(() => Object.fromEntries(CATEGORY_NAMES.map((c) => [c, true])));
   const [created, setCreated] = useState(null); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
@@ -1068,7 +1119,7 @@ function CreateLinkTab({ categories, background, cardCount, countdownSeconds, ti
     if (pool.length < 2) { setError("Select at least one category with pairs."); return; }
     setError(""); setSaving(true);
     const code = uid(5);
-    const game = { code, name: name.trim(), background, cardCount, countdownSeconds, timerSeconds, music, pairs: pool, createdAt: Date.now() };
+    const game = { code, name: name.trim(), background, cardCount, countdownSeconds, timerSeconds, movesBonusThreshold, music, pairs: pool, createdAt: Date.now() };
     await saveJSON("game-" + code, game);
     const idxEntry = { code, name: game.name, createdAt: game.createdAt, cardCount };
     const newIndex = [idxEntry, ...(games || [])];
@@ -1334,6 +1385,23 @@ function CardCountTab({ cardCount, setCardCount, maxPairs }) {
         ))}
       </div>
       <p style={{ fontSize: 11, color: CREAM_FAINT, margin: 0 }}>Your combined categories currently support up to {max} cards ({maxPairs} pairs). Add more pairs to unlock higher counts.</p>
+    </div>
+  );
+}
+
+function MovesBonusTab({ movesBonusThreshold, setMovesBonusThreshold }) {
+  const [saving, setSaving] = useState(false);
+  const persist = async (val) => { setSaving(true); setMovesBonusThreshold(val); await saveJSON("moves-bonus-threshold", val); setSaving(false); };
+  const presets = [10, 15, 20, 25];
+  return (
+    <div>
+      <p style={{ fontSize: 12, color: CREAM_MUTED, margin: "0 0 4px" }}>Finishing the whole board in this many moves or fewer earns a flat +{MOVES_BONUS_POINTS} point bonus at the end.</p>
+      <p style={{ fontSize: 12, color: CREAM_FAINT, margin: "0 0 16px" }}>Sets the default for the next links you create. Doesn't apply if the overall game timer runs out first.</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {presets.map((n) => (
+          <button key={n} className="ip-btn" onClick={() => persist(n)} disabled={saving} style={{ background: movesBonusThreshold === n ? COLORS.gold : "rgba(247,244,239,0.1)", color: movesBonusThreshold === n ? COLORS.navy : COLORS.cream, border: "none", borderRadius: 10, padding: "9px 16px", fontSize: 13 }}>{n} moves</button>
+        ))}
+      </div>
     </div>
   );
 }
