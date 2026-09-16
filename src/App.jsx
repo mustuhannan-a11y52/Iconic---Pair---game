@@ -475,6 +475,19 @@ function Shell({ background, children }) {
         .ip-progress-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, ${COLORS.gold}, ${COLORS.coral}); transition: width 0.4s ease; }
         .ip-ticker-in { animation: ip-ticker-in 0.35s ease both; }
         @keyframes ip-ticker-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+        .ip-panel-body { padding: 30px 32px; box-sizing: border-box; }
+        .ip-hero-title { font-size: 40px; }
+        .ip-countdown-number { font-size: 110px; }
+        @media (max-width: 480px) {
+          .ip-panel-body { padding: 20px 18px; }
+          .ip-hero-title { font-size: 28px; }
+          .ip-countdown-number { font-size: 64px; }
+        }
+        @media (max-width: 360px) {
+          .ip-panel-body { padding: 16px 14px; }
+          .ip-hero-title { font-size: 24px; }
+          .ip-countdown-number { font-size: 52px; }
+        }
         .ip-countdown-pop { animation: ip-countdown-pop 1s cubic-bezier(.2,.8,.3,1.1) both; }
         @keyframes ip-countdown-pop { 0% { opacity: 0; transform: scale(0.4); } 30% { opacity: 1; transform: scale(1.15); } 100% { opacity: 0; transform: scale(1.4); } }
         .ip-instructions-highlight { animation: ip-instructions-glow 2.2s ease-in-out infinite; }
@@ -502,7 +515,7 @@ function Panel({ children, maxWidth = 480, style }) {
       boxShadow: `0 0 60px rgba(242,169,59,0.1), 0 30px 70px rgba(0,0,0,0.55)`, ...style,
     }}>
       <div style={{ height: 4, width: "100%", background: `linear-gradient(90deg, ${COLORS.gold}, ${COLORS.coral}, ${COLORS.teal})` }} />
-      <div style={{ padding: "30px 32px" }}>{children}</div>
+      <div className="ip-panel-body">{children}</div>
     </div>
   );
 }
@@ -594,7 +607,7 @@ function InstructionsOverlay({ game, onClose }) {
 function CardFan() {
   const cards = [{ t: -22, x: -64, c: COLORS.gold }, { t: -8, x: -22, c: COLORS.coral }, { t: 8, x: 22, c: COLORS.teal }, { t: 22, x: 64, c: COLORS.gold }];
   return (
-    <div style={{ position: "relative", height: 100, width: 260, margin: "0 auto 20px" }}>
+    <div style={{ position: "relative", height: 100, width: 260, maxWidth: "90vw", margin: "0 auto 20px" }}>
       <div className="ip-glow-pulse" style={{ position: "absolute", inset: 0, background: "radial-gradient(circle, rgba(242,169,59,0.35), transparent 70%)", filter: "blur(20px)" }} />
       {cards.map((c, i) => (
         <div key={i} style={{
@@ -614,7 +627,7 @@ function JoinScreen({ onJoin }) {
     <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", marginTop: "7vh" }}>
       <CardFan />
       <p className="ip-display" style={{ color: COLORS.gold, fontSize: 13, letterSpacing: 2, opacity: 0.9, margin: "0 0 8px", textTransform: "uppercase" }}>Iconic pairs</p>
-      <h1 className="ip-display ip-gradient-text" style={{ fontSize: 40, fontWeight: 800, margin: "0 0 28px", textAlign: "center" }}>Enter your game code</h1>
+      <h1 className="ip-display ip-gradient-text ip-hero-title" style={{ fontWeight: 800, margin: "0 0 28px", textAlign: "center" }}>Enter your game code</h1>
       <Panel maxWidth={380}>
         <label style={{ display: "block", fontSize: 13, color: CREAM_MUTED, marginBottom: 8 }}>Game code</label>
         <input className="ip-input" value={code} onChange={(e) => { setCode(e.target.value); setError(""); }} onKeyDown={(e) => e.key === "Enter" && submit()}
@@ -636,7 +649,7 @@ function PlayerLogin({ game, onPlay, onBack }) {
     <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", marginTop: "8vh" }}>
       <CardFan />
       <p className="ip-display" style={{ color: CREAM_MUTED, fontSize: 14, margin: "0 0 6px" }}>You're invited to play</p>
-      <h1 className="ip-display ip-gradient-text" style={{ fontSize: 40, fontWeight: 800, margin: "0 0 32px", textAlign: "center", maxWidth: 520 }}>{game.name}</h1>
+      <h1 className="ip-display ip-gradient-text ip-hero-title" style={{ fontWeight: 800, margin: "0 0 32px", textAlign: "center", maxWidth: 520 }}>{game.name}</h1>
       <Panel maxWidth={380}>
         <label style={{ display: "block", fontSize: 13, color: CREAM_MUTED, marginBottom: 8 }}>Your name</label>
         <input className="ip-input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} onKeyDown={(e) => e.key === "Enter" && submit("laptop")}
@@ -661,7 +674,7 @@ function PlayerLogin({ game, onPlay, onBack }) {
    COUNTDOWN (with real-time card shuffle)
 --------------------------------------------------------- */
 
-function CountdownScreen({ game, onDone, onShowInstructions }) {
+function CountdownScreen({ game, deviceMode, onDone, onShowInstructions }) {
   const seconds = game.countdownSeconds ?? DEFAULT_COUNTDOWN_SECONDS;
   const [count, setCount] = useState(seconds);
   const [order, setOrder] = useState(() => shuffle(Array.from({ length: Math.min(game.cardCount, 30) }, (_, i) => i)));
@@ -678,7 +691,8 @@ function CountdownScreen({ game, onDone, onShowInstructions }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const cols = Math.max(4, Math.min(8, Math.ceil(Math.sqrt(order.length * 1.4))));
+  const autoCols = Math.max(4, Math.min(8, Math.ceil(Math.sqrt(order.length * 1.4))));
+  const cols = deviceMode === "mobile" ? Math.min(4, autoCols) : autoCols;
 
   return (
     <div style={{ width: "100%", maxWidth: 700, display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
@@ -698,8 +712,8 @@ function CountdownScreen({ game, onDone, onShowInstructions }) {
           ))}
         </div>
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 20 }}>
-          <span key={count} className="ip-display ip-countdown-pop" style={{
-            fontSize: 110, fontWeight: 800, color: COLORS.gold, textShadow: "0 10px 40px rgba(0,0,0,0.6)",
+          <span key={count} className="ip-display ip-countdown-pop ip-countdown-number" style={{
+            fontWeight: 800, color: COLORS.gold, textShadow: "0 10px 40px rgba(0,0,0,0.6)",
           }}>{count > 0 ? count : "GO!"}</span>
         </div>
       </div>
@@ -948,7 +962,7 @@ function GameBoard({ game, playerName, team, initialLayout, onExit }) {
         </div>
         {isTopScore && <p className="ip-display" style={{ color: COLORS.gold, fontSize: 14, letterSpacing: 1, textTransform: "uppercase", margin: "0 0 4px", fontWeight: 800 }}>Top of the leaderboard!</p>}
         <p className="ip-display" style={{ color: COLORS.gold, fontSize: 13, letterSpacing: 1, textTransform: "uppercase", margin: "0 0 8px" }}>{tier}</p>
-        <h1 className="ip-display ip-gradient-text" style={{ fontSize: 40, fontWeight: 800, margin: "0 0 6px", textAlign: "center" }}>{score} points</h1>
+        <h1 className="ip-display ip-gradient-text ip-hero-title" style={{ fontWeight: 800, margin: "0 0 6px", textAlign: "center" }}>{score} points</h1>
         <p style={{ color: CREAM_MUTED, fontSize: 15, margin: "0 0 12px" }}>{timedOut ? `Time ran out, ${playerName.split(" ")[0]} — ` : "Nice work, "}{!timedOut && playerName.split(" ")[0]}{timedOut && `${matchedCount}/${totalPairs} pairs found`}</p>
         {movesBonusAwarded && (
           <div className="ip-fade-in" style={{ background: "rgba(46,196,182,0.15)", border: `1px solid ${COLORS.teal}`, borderRadius: 999, padding: "6px 16px", fontSize: 13, color: COLORS.teal, fontWeight: 600, margin: "0 0 20px" }}>
@@ -987,7 +1001,7 @@ function GameBoard({ game, playerName, team, initialLayout, onExit }) {
           <p className="ip-display" style={{ color: COLORS.cream, fontSize: 12, opacity: 0.65, margin: 0 }}>{game.name}</p>
           <p style={{ color: COLORS.cream, fontSize: 14, margin: "2px 0 0", opacity: 0.85 }}>Playing as {playerName}{team ? ` · ${team}` : ""}</p>
         </div>
-        <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", rowGap: 8 }}>
           <MiniStat label="Score" value={score} highlight />
           <MiniStat label={timerSeconds > 0 ? "Time left" : "Time"} value={timerSeconds > 0 ? fmtTime(remaining) : fmtTime(seconds)} warn={timerSeconds > 0 && remaining <= 20} />
           <MiniStat label="Moves" value={moves} />
@@ -1015,17 +1029,17 @@ function GameBoard({ game, playerName, team, initialLayout, onExit }) {
       )}
 
       {showBonusBanner && (
-        <div className="ip-banner-in" style={{ position: "absolute", top: -6, left: "50%", zIndex: 26, background: `linear-gradient(135deg, ${COLORS.gold}, ${COLORS.coral})`, color: COLORS.navy, padding: "12px 26px", borderRadius: 14, fontWeight: 700, fontSize: 15, textAlign: "center", boxShadow: "0 16px 40px rgba(242,169,59,0.5)", whiteSpace: "nowrap" }}>
+        <div className="ip-banner-in" style={{ position: "absolute", top: -6, left: "50%", zIndex: 26, background: `linear-gradient(135deg, ${COLORS.gold}, ${COLORS.coral})`, color: COLORS.navy, padding: "12px 22px", borderRadius: 14, fontWeight: 700, fontSize: 15, textAlign: "center", boxShadow: "0 16px 40px rgba(242,169,59,0.5)", maxWidth: "88vw", boxSizing: "border-box" }}>
           ⚡ Double points! Your next match is worth {BONUS_POINTS}
         </div>
       )}
       {show20Warning && !showBonusBanner && (
-        <div className="ip-banner-in" style={{ position: "absolute", top: -6, left: "50%", zIndex: 26, background: `linear-gradient(135deg, ${COLORS.coral}, #c0392b)`, color: COLORS.cream, padding: "12px 26px", borderRadius: 14, fontWeight: 700, fontSize: 15, textAlign: "center", boxShadow: "0 16px 40px rgba(255,107,91,0.5)", whiteSpace: "nowrap" }}>
+        <div className="ip-banner-in" style={{ position: "absolute", top: -6, left: "50%", zIndex: 26, background: `linear-gradient(135deg, ${COLORS.coral}, #c0392b)`, color: COLORS.cream, padding: "12px 22px", borderRadius: 14, fontWeight: 700, fontSize: 15, textAlign: "center", boxShadow: "0 16px 40px rgba(255,107,91,0.5)", maxWidth: "88vw", boxSizing: "border-box" }}>
           ⏰ Only 20 seconds left!
         </div>
       )}
       {toast && !showBonusBanner && !show20Warning && (
-        <div className="ip-toast-in" style={{ position: "absolute", top: 60, left: "50%", zIndex: 25, background: COLORS.navy, color: COLORS.gold, padding: "8px 18px", borderRadius: 999, fontSize: 13, fontWeight: 600, boxShadow: "0 10px 26px rgba(0,0,0,0.35)", whiteSpace: "nowrap" }}>{toast}</div>
+        <div className="ip-toast-in" style={{ position: "absolute", top: 60, left: "50%", zIndex: 25, background: COLORS.navy, color: COLORS.gold, padding: "8px 16px", borderRadius: 16, fontSize: 12, fontWeight: 600, boxShadow: "0 10px 26px rgba(0,0,0,0.35)", maxWidth: "88vw", boxSizing: "border-box", textAlign: "center" }}>{toast}</div>
       )}
       <Confetti burstKey={burst} colors={burstColors} originTop={70} />
       <MatchCelebration triggerKey={celebration} />
@@ -1538,7 +1552,7 @@ export default function App() {
   if (view === "countdown") {
     return (
       <Shell background={bg}>
-        <CountdownScreen game={activeGame} onDone={() => setView("game")} onShowInstructions={() => setShowInstructionsOverlay(true)} />
+        <CountdownScreen game={activeGame} deviceMode={playerDevice} onDone={() => setView("game")} onShowInstructions={() => setShowInstructionsOverlay(true)} />
         {showInstructionsOverlay && <InstructionsOverlay game={activeGame} onClose={() => setShowInstructionsOverlay(false)} />}
       </Shell>
     );
