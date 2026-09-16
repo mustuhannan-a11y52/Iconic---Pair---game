@@ -302,17 +302,33 @@ function extractYouTubeId(url) {
 
 function useYouTubeBackgroundMusic(music) {
   const playerRef = useRef(null);
-  const containerIdRef = useRef("yt-bg-" + Math.random().toString(36).slice(2));
   const active = !!(music && music.type === "youtube" && music.videoId);
   const [ytMuted, setYtMuted] = useState(true);
 
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
+
+    // The container the YouTube player attaches to is created here, directly
+    // via document.createElement, and appended straight to <body> — NOT
+    // rendered through JSX. The YouTube API secretly replaces this node with
+    // an iframe behind React's back; if React ever tried to reconcile a JSX
+    // element sitting at that spot, it would crash the whole app the next
+    // time this component re-renders (which happens every second, from the
+    // game timer). Keeping it fully outside React's tree avoids that.
+    const container = document.createElement("div");
+    container.style.position = "fixed";
+    container.style.width = "0";
+    container.style.height = "0";
+    container.style.overflow = "hidden";
+    container.style.opacity = "0";
+    container.style.pointerEvents = "none";
+    document.body.appendChild(container);
+
     function createPlayer() {
       if (cancelled) return;
       try {
-        playerRef.current = new window.YT.Player(containerIdRef.current, {
+        playerRef.current = new window.YT.Player(container, {
           height: "0", width: "0", videoId: music.videoId,
           playerVars: { autoplay: 1, loop: 1, playlist: music.videoId, controls: 0, disablekb: 1, fs: 0, modestbranding: 1 },
           events: {
@@ -345,6 +361,7 @@ function useYouTubeBackgroundMusic(music) {
       cancelled = true;
       try { playerRef.current?.destroy(); } catch (e) {}
       playerRef.current = null;
+      try { if (container.parentNode) container.parentNode.removeChild(container); } catch (e) {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, music?.videoId]);
@@ -361,7 +378,7 @@ function useYouTubeBackgroundMusic(music) {
     } catch (e) {}
   };
 
-  return { containerId: containerIdRef.current, active, toggleMute, ytMuted };
+  return { active, toggleMute, ytMuted };
 }
 
 /* ---------------------------------------------------------
@@ -611,9 +628,9 @@ function JoinScreen({ onJoin }) {
 
 function PlayerLogin({ game, onPlay, onBack }) {
   const [name, setName] = useState(""); const [team, setTeam] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
-  const submit = async () => {
+  const submit = async (device) => {
     if (!name.trim()) { setError("Enter your name to play."); return; }
-    setBusy(true); await Tone.start().catch(() => {}); onPlay(name.trim(), team.trim());
+    setBusy(true); await Tone.start().catch(() => {}); onPlay(name.trim(), team.trim(), device);
   };
   return (
     <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", marginTop: "8vh" }}>
@@ -622,14 +639,18 @@ function PlayerLogin({ game, onPlay, onBack }) {
       <h1 className="ip-display ip-gradient-text" style={{ fontSize: 40, fontWeight: 800, margin: "0 0 32px", textAlign: "center", maxWidth: 520 }}>{game.name}</h1>
       <Panel maxWidth={380}>
         <label style={{ display: "block", fontSize: 13, color: CREAM_MUTED, marginBottom: 8 }}>Your name</label>
-        <input className="ip-input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} onKeyDown={(e) => e.key === "Enter" && submit()}
+        <input className="ip-input" value={name} onChange={(e) => { setName(e.target.value); setError(""); }} onKeyDown={(e) => e.key === "Enter" && submit("laptop")}
           placeholder="Jordan Lee" autoFocus style={{ ...inputStyle(error), marginBottom: 16 }} />
         <label style={{ display: "block", fontSize: 13, color: CREAM_MUTED, marginBottom: 8 }}>Team (optional)</label>
-        <input className="ip-input" value={team} onChange={(e) => setTeam(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()}
+        <input className="ip-input" value={team} onChange={(e) => setTeam(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit("laptop")}
           placeholder="e.g. Falcons" style={{ ...inputStyle(false), marginBottom: 8 }} />
         {error && <p style={{ color: COLORS.coral, fontSize: 13, margin: "0 0 12px" }}>{error}</p>}
-        <PrimaryButton onClick={submit} disabled={busy} full style={{ marginTop: 8 }}>🔊 Click to play</PrimaryButton>
-        <p style={{ fontSize: 11, color: CREAM_FAINT, textAlign: "center", margin: "10px 0 0" }}>Turns on sound for this game — you can mute anytime.</p>
+        <label style={{ display: "block", fontSize: 13, color: CREAM_MUTED, margin: "8px 0 8px" }}>Playing on…</label>
+        <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+          <PrimaryButton onClick={() => submit("mobile")} disabled={busy} full color={COLORS.teal} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>📱 Mobile</PrimaryButton>
+          <PrimaryButton onClick={() => submit("laptop")} disabled={busy} full style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>💻 Laptop</PrimaryButton>
+        </div>
+        <p style={{ fontSize: 11, color: CREAM_FAINT, textAlign: "center", margin: "10px 0 0" }}>Also turns on sound for this game — you can mute anytime.</p>
       </Panel>
       <button className="ip-btn" onClick={onBack} style={{ background: "none", border: "none", color: CREAM_FAINT, fontSize: 13, marginTop: 24 }}>Wrong game? Enter a different code</button>
     </div>
@@ -744,7 +765,7 @@ async function pushActivity(code, name, text, team) {
   } catch (e) {}
 }
 
-function GameBoard({ game, playerName, team, onExit }) {
+function GameBoard({ game, playerName, team, initialLayout, onExit }) {
   const [cards] = useState(() => buildBoard(game.pairs, game.cardCount));
   const [flipped, setFlipped] = useState([]);
   const [matched, setMatched] = useState({});
@@ -756,7 +777,7 @@ function GameBoard({ game, playerName, team, onExit }) {
   const [leaderboard, setLeaderboard] = useState(null);
   const [isTopScore, setIsTopScore] = useState(false);
   const [movesBonusAwarded, setMovesBonusAwarded] = useState(false);
-  const [layoutMode, setLayoutMode] = useState(() => (typeof window !== "undefined" && window.innerWidth < 700 ? "mobile" : "laptop"));
+  const [layoutMode, setLayoutMode] = useState(initialLayout || (typeof window !== "undefined" && window.innerWidth < 700 ? "mobile" : "laptop"));
   const [burst, setBurst] = useState(null);
   const [burstColors, setBurstColors] = useState([COLORS.gold]);
   const [toast, setToast] = useState(null);
@@ -933,7 +954,6 @@ function GameBoard({ game, playerName, team, onExit }) {
   return (
     <div style={{ width: "100%", maxWidth: 980, display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
       <GoldFlash triggerKey={goldFlash} />
-      {ytMusic.active && <div id={ytMusic.containerId} style={{ position: "fixed", width: 0, height: 0, overflow: "hidden", opacity: 0, pointerEvents: "none" }} />}
       <LiveSidebar code={game.code} />
       <InstructionsButton onClick={() => setShowInstructions(true)} />
       {showInstructions && <InstructionsOverlay game={game} onClose={() => setShowInstructions(false)} />}
@@ -1449,6 +1469,7 @@ export default function App() {
   const [activeGame, setActiveGame] = useState(null);
   const [playerName, setPlayerName] = useState("");
   const [playerTeam, setPlayerTeam] = useState("");
+  const [playerDevice, setPlayerDevice] = useState("laptop");
   const [showInstructionsOverlay, setShowInstructionsOverlay] = useState(false);
 
   useEffect(() => {
@@ -1487,7 +1508,7 @@ export default function App() {
       </Shell>
     );
   }
-  if (view === "player-login") return <Shell background={bg}><PlayerLogin game={activeGame} onPlay={(n, t) => { setPlayerName(n); setPlayerTeam(t); setView("instructions"); }} onBack={goJoin} /></Shell>;
+  if (view === "player-login") return <Shell background={bg}><PlayerLogin game={activeGame} onPlay={(n, t, d) => { setPlayerName(n); setPlayerTeam(t); setPlayerDevice(d); setView("instructions"); }} onBack={goJoin} /></Shell>;
   if (view === "instructions") return <Shell background={bg}><InstructionsScreen game={activeGame} onStart={() => setView("countdown")} /></Shell>;
   if (view === "countdown") {
     return (
@@ -1497,6 +1518,6 @@ export default function App() {
       </Shell>
     );
   }
-  if (view === "game") return <Shell background={bg}><GameBoard game={activeGame} playerName={playerName} team={playerTeam} onExit={goJoin} /></Shell>;
+  if (view === "game") return <Shell background={bg}><GameBoard game={activeGame} playerName={playerName} team={playerTeam} initialLayout={playerDevice} onExit={goJoin} /></Shell>;
   return null;
 }
