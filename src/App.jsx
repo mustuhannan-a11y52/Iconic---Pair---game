@@ -225,12 +225,22 @@ function useGameAudio(musicConfig) {
       synthRef.current = synth;
 
       if (musicConfig && musicConfig.type === "custom" && musicConfig.url) {
-        // Custom background track supplied by the admin (pasted URL or uploaded file)
+        // Custom background track (uploaded MP3 or pasted URL). iOS Safari
+        // treats <audio> elements as needing their OWN separate unlock from
+        // Web Audio — resuming the Tone.js context does not carry over to a
+        // plain <audio> element created later. So if primeCustomAudio() already
+        // created and started this element inside a real click, reuse that
+        // exact instance instead of creating (and silently failing to play) a
+        // fresh one here.
         try {
-          const el = new Audio(musicConfig.url);
-          el.loop = true;
-          el.volume = 0.35;
-          el.play().catch(() => {});
+          let el = window.__ipCustomAudioEl;
+          if (!el || el.src.indexOf(musicConfig.url) === -1) {
+            el = new Audio(musicConfig.url);
+            el.loop = true;
+            el.volume = 0.35;
+            el.play().catch(() => {});
+            window.__ipCustomAudioEl = el;
+          }
           audioElRef.current = el;
         } catch (e) {}
       } else if (musicConfig && musicConfig.type === "youtube" && musicConfig.videoId) {
@@ -264,6 +274,7 @@ function useGameAudio(musicConfig) {
       nodesRef.current = [];
       Tone.Transport.stop(); Tone.Transport.cancel();
       if (audioElRef.current) { audioElRef.current.pause(); audioElRef.current = null; }
+      if (window.__ipCustomAudioEl) { try { window.__ipCustomAudioEl.pause(); } catch (e) {} window.__ipCustomAudioEl = null; }
       synthRef.current?.dispose();
       startedRef.current = false;
     } catch (e) {}
@@ -564,13 +575,40 @@ function InstructionsContent({ game }) {
 }
 
 function InstructionsScreen({ game, onStart }) {
+  const handleStart = async () => {
+    try {
+      await Tone.start();
+      // Firing an actual (near-silent, ultra-short) sound directly inside
+      // this click is the most reliable way to get mobile Safari/Chrome to
+      // truly open the audio hardware — just resuming the context isn't
+      // always enough on phones, even though it's enough on desktop.
+      const primer = new Tone.Synth().toDestination();
+      primer.volume.value = -50;
+      primer.triggerAttackRelease("C4", "32n");
+      setTimeout(() => { try { primer.dispose(); } catch (e) {} }, 300);
+    } catch (e) {}
+    // A custom (uploaded/pasted) music track uses a plain <audio> element,
+    // which iOS requires to have its first .play() call happen inside a real
+    // click too — separately from the Web Audio unlock above. Create and
+    // start it right here so it's ready by the time the game screen mounts.
+    if (game.music && game.music.type === "custom" && game.music.url) {
+      try {
+        const el = new Audio(game.music.url);
+        el.loop = true;
+        el.volume = 0.35;
+        el.play().catch(() => {});
+        window.__ipCustomAudioEl = el;
+      } catch (e) {}
+    }
+    onStart();
+  };
   return (
     <div style={{ width: "100%", display: "flex", flexDirection: "column", alignItems: "center", marginTop: "7vh" }}>
       <p className="ip-display" style={{ color: CREAM_MUTED, fontSize: 13, letterSpacing: 1, textTransform: "uppercase", margin: "0 0 8px" }}>Before you start</p>
       <h1 className="ip-display ip-gradient-text" style={{ fontSize: 34, fontWeight: 800, margin: "0 0 28px", textAlign: "center" }}>How to play</h1>
       <Panel maxWidth={440}>
         <InstructionsContent game={game} />
-        <PrimaryButton onClick={onStart} full style={{ marginTop: 8 }}>I'm ready — start the countdown</PrimaryButton>
+        <PrimaryButton onClick={handleStart} full style={{ marginTop: 8 }}>I'm ready — start the countdown</PrimaryButton>
       </Panel>
     </div>
   );
