@@ -721,18 +721,43 @@ function buildBoard(pairs, cardCount) {
   return shuffle(cards);
 }
 
-function LiveSidebar({ code }) {
+function LiveSidebar({ code, compact }) {
   const [events, setEvents] = useState([]);
+  const [toastEntry, setToastEntry] = useState(null);
+  const lastSeenAtRef = useRef(0);
+
   useEffect(() => {
     let stop = false;
     const poll = async () => {
       const feed = await loadJSON("activity-" + code, []);
-      if (!stop) setEvents(feed.slice(-8).reverse());
+      if (stop) return;
+      const recent = feed.slice(-8).reverse();
+      setEvents(recent);
+      if (compact && recent.length && recent[0].at !== lastSeenAtRef.current) {
+        lastSeenAtRef.current = recent[0].at;
+        setToastEntry(recent[0]);
+        setTimeout(() => setToastEntry(null), 3200);
+      }
     };
     poll();
     const id = setInterval(poll, 2500);
     return () => { stop = true; clearInterval(id); };
-  }, [code]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code, compact]);
+
+  if (compact) {
+    if (!toastEntry) return null;
+    return (
+      <div key={toastEntry.at} className="ip-toast-in" style={{
+        position: "fixed", bottom: 14, left: "50%", transform: "translateX(-50%)", zIndex: 24,
+        background: "rgba(18,18,38,0.88)", backdropFilter: "blur(10px)", border: `1px solid ${PANEL_BORDER}`,
+        borderRadius: 999, padding: "8px 16px", maxWidth: "88vw", fontSize: 12, color: COLORS.cream,
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+      }}>
+        🟢 <strong>{toastEntry.name}</strong>{toastEntry.team ? <span style={{ color: COLORS.teal }}> ({toastEntry.team})</span> : null} <span style={{ color: CREAM_MUTED }}>{toastEntry.text}</span>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -954,7 +979,7 @@ function GameBoard({ game, playerName, team, initialLayout, onExit }) {
   return (
     <div style={{ width: "100%", maxWidth: 980, display: "flex", flexDirection: "column", alignItems: "center", position: "relative" }}>
       <GoldFlash triggerKey={goldFlash} />
-      <LiveSidebar code={game.code} />
+      <LiveSidebar code={game.code} compact={layoutMode === "mobile"} />
       <InstructionsButton onClick={() => setShowInstructions(true)} />
       {showInstructions && <InstructionsOverlay game={game} onClose={() => setShowInstructions(false)} />}
       <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 12, marginTop: 22 }}>
